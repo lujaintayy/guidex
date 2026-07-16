@@ -11,6 +11,23 @@ env = { "CI" = "true" }
 [workflows]
 runButton = "Project"
 
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Infrastructure Copilot Video"
+
+[[workflows.workflow]]
+name = "Infrastructure Copilot Video"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=25843 BASE_PATH=/infrastructure-copilot-video pnpm --filter @workspace/infrastructure-copilot-video run dev"
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true

@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/infrastructure-copilot-video"
+title = "Infrastructure Copilot — Product Video"
+version = "1.0.0"
+id = "infrastructure-copilot-video"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/infrastructure-copilot-video" ]
+localPort = 25843
+
+[services.development]
+run = "pnpm --filter @workspace/infrastructure-copilot-video run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/infrastructure-copilot-video", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/infrastructure-copilot-video/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25843"
+BASE_PATH = "/infrastructure-copilot-video"
