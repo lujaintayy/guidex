@@ -4,10 +4,9 @@ import {
   LayoutDashboard, Server, Rocket, FileCode2, Activity,
   Bot, ScrollText, FileText, BarChart3, Users, Bell,
   ChevronLeft, ChevronRight, Moon, Sun, LogOut, Building2,
-  ShieldCheck, Info
+  ShieldCheck, Info, UserCheck
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth-context";
 import { useListNotifications } from "@workspace/api-client-react";
 import { MOCK_NOTIFICATIONS } from "@/lib/mock-data";
@@ -44,6 +43,8 @@ export function Sidebar({ theme, onThemeToggle }: SidebarProps) {
     if (href === "/") return location === "/";
     return location.startsWith(href);
   };
+
+  const isAdmin = user?.role === "admin";
 
   return (
     <aside
@@ -104,6 +105,28 @@ export function Sidebar({ theme, onThemeToggle }: SidebarProps) {
             </Link>
           );
         })}
+
+        {/* Admin-only: User Requests */}
+        {isAdmin && (
+          <Link href="/user-requests">
+            <div
+              className={`flex items-center gap-3 px-2 py-2 rounded-md cursor-pointer transition-colors ${
+                isActive("/user-requests")
+                  ? "bg-primary/15 text-primary font-medium"
+                  : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              } ${collapsed ? "justify-center" : ""}`}
+              data-testid="nav-user-requests"
+            >
+              <UserCheck className={`w-4 h-4 shrink-0 ${isActive("/user-requests") ? "text-primary" : ""}`} />
+              {!collapsed && (
+                <>
+                  <span className="text-sm truncate">User Requests</span>
+                  <span className="ml-auto text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-medium">Admin</span>
+                </>
+              )}
+            </div>
+          </Link>
+        )}
       </nav>
 
       {/* Footer */}
@@ -128,7 +151,7 @@ export function Sidebar({ theme, onThemeToggle }: SidebarProps) {
               <>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-sidebar-foreground truncate">{user.name}</p>
-                  <p className="text-[10px] text-muted-foreground">Engineer</p>
+                  <p className="text-[10px] text-muted-foreground capitalize">{user.role ?? "Engineer"}</p>
                 </div>
                 <button
                   onClick={logout}

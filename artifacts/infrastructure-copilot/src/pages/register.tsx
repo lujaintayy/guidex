@@ -1,46 +1,37 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { ShieldCheck, Loader2, Eye, EyeOff } from "lucide-react";
-import { useAuth } from "@/lib/auth-context";
+import { ShieldCheck, Loader2, Eye, EyeOff, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const [, setLocation] = useLocation();
-  const { login } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (form.name.trim().length < 2) { setError("Name must be at least 2 characters"); return; }
+    if (!form.email.includes("@")) { setError("Please enter a valid email"); return; }
+    if (form.password.length < 8) { setError("Password must be at least 8 characters"); return; }
+
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ name: form.name.trim(), email: form.email.trim(), password: form.password }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        // Handle specific statuses
-        if (data.status === "pending_verification") {
-          setLocation(`/verify-email?email=${encodeURIComponent(email.trim())}`);
-          return;
-        }
-        if (data.status === "pending_approval") {
-          setLocation("/awaiting-approval");
-          return;
-        }
-        setError(data.error ?? "Invalid email or password");
-        return;
-      }
-      login(data.user, data.token);
-      setLocation("/");
+      if (!res.ok) { setError(data.error ?? "Registration failed"); return; }
+      setLocation(`/verify-email?email=${encodeURIComponent(form.email.trim())}`);
     } catch {
       setError("Network error — please try again");
     } finally {
@@ -64,22 +55,24 @@ export default function LoginPage() {
         </div>
         <div className="mb-auto mt-16">
           <h1 className="text-4xl font-bold text-foreground mb-4 leading-tight">
-            Deploy with<br />
-            <span className="text-primary">confidence.</span>
+            Join your<br />
+            <span className="text-primary">team today.</span>
           </h1>
           <p className="text-muted-foreground text-lg leading-relaxed max-w-md">
-            AI-powered infrastructure management for production-grade teams. Plan, validate, deploy, and monitor with full audit trails.
+            Create an account to manage infrastructure, run deployments, and collaborate with your team on GuideX.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-4 mt-12">
+        <div className="mt-12 space-y-3">
           {[
-            { label: "Deployments", value: "2,400+" },
-            { label: "Success Rate", value: "99.2%" },
-            { label: "Servers Managed", value: "850+" },
-          ].map(({ label, value }) => (
-            <div key={label} className="p-4 rounded-xl bg-card border border-border">
-              <p className="text-2xl font-bold text-primary">{value}</p>
-              <p className="text-xs text-muted-foreground mt-1">{label}</p>
+            "Verify your email address",
+            "Admin reviews your request",
+            "Get access to the platform",
+          ].map((step, i) => (
+            <div key={step} className="flex items-center gap-3">
+              <div className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center shrink-0">
+                {i + 1}
+              </div>
+              <p className="text-sm text-muted-foreground">{step}</p>
             </div>
           ))}
         </div>
@@ -95,20 +88,37 @@ export default function LoginPage() {
             <span className="font-semibold text-foreground">GuideX</span>
           </div>
 
-          <h2 className="text-2xl font-bold text-foreground mb-2">Welcome back</h2>
-          <p className="text-muted-foreground mb-8">Sign in to your account to continue</p>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <UserPlus className="w-4 h-4 text-primary" />
+            </div>
+            <h2 className="text-2xl font-bold text-foreground">Create account</h2>
+          </div>
+          <p className="text-muted-foreground mb-8">Fill in the details below to get started</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="name">Full name</Label>
+              <Input
+                id="name"
+                type="text"
+                value={form.name}
+                onChange={set("name")}
+                placeholder="Jane Smith"
+                className="mt-1"
+                required
+                autoComplete="name"
+              />
+            </div>
             <div>
               <Label htmlFor="email">Email address</Label>
               <Input
                 id="email"
                 type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
+                value={form.email}
+                onChange={set("email")}
                 placeholder="you@company.com"
                 className="mt-1"
-                data-testid="input-email"
                 required
                 autoComplete="email"
               />
@@ -119,13 +129,12 @@ export default function LoginPage() {
                 <Input
                   id="password"
                   type={showPw ? "text" : "password"}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  value={form.password}
+                  onChange={set("password")}
+                  placeholder="Min. 8 characters"
                   className="pr-10"
-                  data-testid="input-password"
                   required
-                  autoComplete="current-password"
+                  autoComplete="new-password"
                 />
                 <button
                   type="button"
@@ -144,18 +153,15 @@ export default function LoginPage() {
               </div>
             )}
 
-            <Button type="submit" className="w-full" disabled={loading} data-testid="button-submit">
-              {loading
-                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Signing in…</>
-                : "Sign in"
-              }
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating account…</> : "Create account"}
             </Button>
           </form>
 
           <p className="text-sm text-muted-foreground text-center mt-6">
-            Don't have an account?{" "}
-            <Link href="/register" className="text-primary hover:underline font-medium">
-              Create one
+            Already have an account?{" "}
+            <Link href="/login" className="text-primary hover:underline font-medium">
+              Sign in
             </Link>
           </p>
         </div>

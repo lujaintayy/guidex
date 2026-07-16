@@ -30,15 +30,32 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     res.status(401).json({ error: "Invalid token" });
     return;
   }
-  const user = await db.select().from(usersTable).where(eq(usersTable.id, payload.sub)).limit(1);
-  if (!user[0]) {
+  const users = await db.select().from(usersTable).where(eq(usersTable.id, payload.sub)).limit(1);
+  const user = users[0];
+  if (!user) {
     res.status(401).json({ error: "User not found" });
     return;
   }
-  (req as Request & { user: typeof user[0] }).user = user[0];
+  // Block non-active users from protected routes
+  if (user.status !== "active") {
+    res.status(403).json({ error: "Account is not active", status: user.status });
+    return;
+  }
+  (req as Request & { user: typeof user }).user = user;
   next();
 }
 
 export function getUser(req: Request) {
-  return (req as Request & { user: { id: number; name: string; email: string; avatarUrl: string | null; createdAt: Date; passwordHash: string } }).user;
+  return (req as Request & {
+    user: {
+      id: number;
+      name: string;
+      email: string;
+      avatarUrl: string | null;
+      status: string;
+      role: string | null;
+      createdAt: Date;
+      passwordHash: string;
+    };
+  }).user;
 }

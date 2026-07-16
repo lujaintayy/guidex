@@ -1,10 +1,15 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+
+export type UserRole = "engineer" | "reviewer" | "admin" | null;
+export type UserStatus = "active" | "pending_verification" | "pending_approval" | "declined" | null;
 
 interface AuthUser {
   id: number;
   name: string;
   email: string;
   avatarUrl?: string | null;
+  role?: UserRole;
+  status?: UserStatus;
 }
 
 interface AuthState {

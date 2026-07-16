@@ -8,6 +8,9 @@ import { AppShell } from "@/components/layout/app-shell";
 
 // Pages
 import LoginPage from "@/pages/login";
+import RegisterPage from "@/pages/register";
+import VerifyEmailPage from "@/pages/verify-email";
+import AwaitingApprovalPage from "@/pages/awaiting-approval";
 import DashboardPage from "@/pages/dashboard";
 import ServersPage from "@/pages/servers/index";
 import ServerDetailPage from "@/pages/servers/detail";
@@ -21,6 +24,7 @@ import DocumentsPage from "@/pages/documents";
 import ReportsPage from "@/pages/reports";
 import OrganizationPage from "@/pages/organization";
 import GuideXPage from "@/pages/guidex";
+import UserRequestsPage from "@/pages/user-requests";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,7 +45,7 @@ function NotFound() {
 }
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     return (localStorage.getItem("infra-theme") as "dark" | "light") ?? "dark";
   });
@@ -60,16 +64,34 @@ function AppRoutes() {
 
   const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
 
+  // Unauthenticated routes (publicly accessible)
   if (!isAuthenticated) {
     return (
       <Switch>
         <Route path="/login" component={LoginPage} />
+        <Route path="/register" component={RegisterPage} />
+        <Route path="/verify-email" component={VerifyEmailPage} />
+        <Route path="/awaiting-approval" component={AwaitingApprovalPage} />
         <Route>
           <Redirect to="/login" />
         </Route>
       </Switch>
     );
   }
+
+  // Authenticated but not yet active — redirect to holding page
+  if (user?.status && user.status !== "active") {
+    return (
+      <Switch>
+        <Route path="/awaiting-approval" component={AwaitingApprovalPage} />
+        <Route>
+          <Redirect to="/awaiting-approval" />
+        </Route>
+      </Switch>
+    );
+  }
+
+  const isAdmin = user?.role === "admin";
 
   return (
     <AppShell theme={theme} onThemeToggle={toggleTheme}>
@@ -87,6 +109,7 @@ function AppRoutes() {
         <Route path="/reports" component={ReportsPage} />
         <Route path="/organization" component={OrganizationPage} />
         <Route path="/guidex" component={GuideXPage} />
+        {isAdmin && <Route path="/user-requests" component={UserRequestsPage} />}
         <Route component={NotFound} />
       </Switch>
     </AppShell>

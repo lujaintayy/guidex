@@ -40,12 +40,17 @@ export async function seedSuperAdmin() {
 
     let userId: number;
     if (existing) {
+      // Ensure the existing super-admin is always active with admin role
+      await db
+        .update(usersTable)
+        .set({ status: "active", role: "admin" })
+        .where(eq(usersTable.id, existing.id));
       userId = existing.id;
     } else {
       const hash = bcrypt.hashSync(password, 10);
       const [newUser] = await db
         .insert(usersTable)
-        .values({ name, email, passwordHash: hash })
+        .values({ name, email, passwordHash: hash, status: "active", role: "admin" })
         .returning({ id: usersTable.id });
       if (!newUser) throw new Error("Failed to insert bootstrap admin user");
       userId = newUser.id;
