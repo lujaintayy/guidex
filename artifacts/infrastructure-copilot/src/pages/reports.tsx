@@ -114,7 +114,31 @@ export default function ReportsPage() {
                 <p className="text-sm text-muted-foreground">{r.summary}</p>
                 <p className="text-xs text-muted-foreground/60 mt-1">{timeAgo(r.createdAt)}</p>
               </div>
-              <Button variant="ghost" size="sm" className="shrink-0" title="Download">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0"
+                title="Download"
+                onClick={() => {
+                  const content = [
+                    `# ${r.title}`,
+                    `Type: ${r.type?.replace(/_/g, " ")}`,
+                    `Generated: ${new Date(r.createdAt).toLocaleString()}`,
+                    ``,
+                    r.summary ?? "",
+                    r.content ?? "",
+                  ].join("\n");
+                  const blob = new Blob([content], { type: "text/markdown" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `${r.title?.replace(/[^a-z0-9]+/gi, "-").toLowerCase() ?? "report"}.md`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }}
+              >
                 <Download className="w-4 h-4" />
               </Button>
             </div>
