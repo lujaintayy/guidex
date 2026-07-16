@@ -35,3 +35,10 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+BOOTSTRAP_ADMIN_EMAIL = "lujain.tayyarah@cyberx.world"
+BOOTSTRAP_ADMIN_NAME = "Lujain Tayyarah"
+BOOTSTRAP_ORG_NAME = "CyberX"

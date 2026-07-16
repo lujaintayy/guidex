@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, FileText, Download, Trash2, Loader2 } from "lucide-react";
+import { Plus, FileText, Download, Trash2, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useListDocuments, useGenerateDocument, useDeleteDocument, getListDocumentsQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
@@ -41,23 +41,39 @@ export default function DocumentsPage() {
   const qc = useQueryClient();
   const [generating, setGenerating] = useState(false);
   const [selectedType, setSelectedType] = useState("sop");
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  const { data: documents, isLoading } = useListDocuments(orgId, undefined, { query: { queryKey: getListDocumentsQueryKey(orgId, undefined) } });
+  // Use consistent query key matching getListDocumentsQueryKey(orgId, undefined)
+  const queryKey = getListDocumentsQueryKey(orgId, undefined);
+  const { data: documents, isLoading } = useListDocuments(orgId, undefined, { query: { queryKey } });
   const allDocs = (documents ?? []) as any[];
+
+  const showToast = (type: "success" | "error", message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const generate = useGenerateDocument({
     mutation: {
       onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getListDocumentsQueryKey(orgId) });
+        // Invalidate with the exact same key used by useListDocuments
+        qc.invalidateQueries({ queryKey });
         setGenerating(false);
+        showToast("success", "Document generated successfully");
       },
-      onError: () => setGenerating(false),
+      onError: (e: any) => {
+        setGenerating(false);
+        showToast("error", e?.message ?? "Failed to generate document");
+      },
     },
   });
 
   const deleteMut = useDeleteDocument({
     mutation: {
-      onSuccess: () => qc.invalidateQueries({ queryKey: getListDocumentsQueryKey(orgId) }),
+      onSuccess: () => {
+        qc.invalidateQueries({ queryKey });
+        showToast("success", "Document deleted");
+      },
     },
   });
 
@@ -66,12 +82,25 @@ export default function DocumentsPage() {
     const label = DOC_TYPES.find(t => t.value === selectedType)?.label ?? selectedType;
     generate.mutate({
       orgId,
-      data: { type: selectedType, title: `${label} — ${new Date().toLocaleDateString()}`, prompt: `Generate ${label} for GuideX platform` },
-    } as any);
+      data: {
+        type: selectedType,
+        title: `${label} — ${new Date().toLocaleDateString()}`,
+        prompt: `Generate ${label} for GuideX platform`,
+      } as any,
+    });
   };
 
   return (
     <div className="p-6 space-y-5 max-w-7xl mx-auto">
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium transition-all
+          ${toast.type === "success" ? "bg-emerald-950 border-emerald-800 text-emerald-300" : "bg-red-950 border-red-800 text-red-300"}`}>
+          {toast.type === "success" ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          {toast.message}
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Documents</h1>
@@ -114,7 +143,22 @@ export default function DocumentsPage() {
                 <p className="text-xs text-muted-foreground">{timeAgo(doc.createdAt)}</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <Button variant="ghost" size="sm"><Download className="w-4 h-4" /></Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="Download"
+                  onClick={() => {
+                    const blob = new Blob([doc.content ?? doc.title], { type: "text/markdown" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `${doc.title}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download className="w-4 h-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"

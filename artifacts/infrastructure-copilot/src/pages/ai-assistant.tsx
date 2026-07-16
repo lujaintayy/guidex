@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { Bot, Send, Plus, Trash2, Loader2, Code2, Terminal, Copy } from "lucide-react";
-import { useAiChat, useListAiConversations, useDeleteAiConversation, getListAiConversationsQueryKey } from "@workspace/api-client-react";
+import { Bot, Send, Plus, Trash2, Loader2, Terminal, Copy } from "lucide-react";
+import {
+  useAiChat, useListAiConversations, useDeleteAiConversation,
+  useGetAiConversation, getListAiConversationsQueryKey, getGetAiConversationQueryKey,
+} from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,11 +44,7 @@ function MessageContent({ content, role }: { content: string; role: "user" | "as
                   <Terminal className="w-3 h-3 text-muted-foreground" />
                   <span className="text-[10px] text-muted-foreground font-mono">{part.lang}</span>
                 </div>
-                <button
-                  onClick={() => navigator.clipboard.writeText(part.content)}
-                  className="p-1 rounded hover:bg-border transition-colors"
-                  title="Copy"
-                >
+                <button onClick={() => navigator.clipboard.writeText(part.content)} className="p-1 rounded hover:bg-border transition-colors" title="Copy">
                   <Copy className="w-3 h-3 text-muted-foreground" />
                 </button>
               </div>
@@ -58,15 +57,9 @@ function MessageContent({ content, role }: { content: string; role: "user" | "as
         return (
           <div key={i} className="text-sm text-foreground">
             {part.content.split("\n").map((line, j) => {
-              if (line.startsWith("**") && line.endsWith("**")) {
-                return <p key={j} className="font-semibold mt-2 first:mt-0">{line.slice(2, -2)}</p>;
-              }
-              if (line.startsWith("- ") || line.startsWith("* ")) {
-                return <p key={j} className="flex gap-2 ml-2"><span className="text-primary mt-1 shrink-0">•</span><span>{line.slice(2)}</span></p>;
-              }
-              if (/^\d+\./.test(line)) {
-                return <p key={j} className="ml-2">{line}</p>;
-              }
+              if (line.startsWith("**") && line.endsWith("**")) return <p key={j} className="font-semibold mt-2 first:mt-0">{line.slice(2, -2)}</p>;
+              if (line.startsWith("- ") || line.startsWith("* ")) return <p key={j} className="flex gap-2 ml-2"><span className="text-primary mt-1 shrink-0">•</span><span>{line.slice(2)}</span></p>;
+              if (/^\d+\./.test(line)) return <p key={j} className="ml-2">{line}</p>;
               if (line.trim() === "") return <br key={j} />;
               return <p key={j}>{line}</p>;
             })}
@@ -91,12 +84,34 @@ export default function AiAssistantPage() {
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
+  const [loadingConv, setLoadingConv] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  let nextId = useRef(1);
+  const nextId = useRef(1);
 
   const { data: conversations, isLoading: convsLoading } = useListAiConversations(orgId, { query: { queryKey: getListAiConversationsQueryKey(orgId) } });
   const chat = useAiChat({ mutation: {} });
   const deleteConv = useDeleteAiConversation({ mutation: { onSuccess: () => qc.invalidateQueries({ queryKey: getListAiConversationsQueryKey(orgId) }) } });
+
+  // Load conversation messages when selecting from sidebar
+  const { data: convDetail } = useGetAiConversation(orgId, activeConvId ?? 0, {
+    query: {
+      queryKey: getGetAiConversationQueryKey(orgId, activeConvId ?? 0),
+      enabled: activeConvId !== null && activeConvId > 0,
+    },
+  });
+
+  useEffect(() => {
+    if (!convDetail || activeConvId === null) return;
+    const loaded: Message[] = (convDetail as any).messages?.map((m: any, idx: number) => ({
+      id: idx + 1,
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    })) ?? [];
+    nextId.current = loaded.length + 1;
+    setMessages(loaded);
+    setConversationId(activeConvId);
+    setLoadingConv(false);
+  }, [convDetail, activeConvId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -106,10 +121,8 @@ export default function AiAssistantPage() {
     const msg = text ?? input.trim();
     if (!msg || chat.isPending) return;
     setInput("");
-
     const userMsg: Message = { role: "user", content: msg, id: nextId.current++ };
     setMessages(prev => [...prev, userMsg]);
-
     try {
       const res = await chat.mutateAsync({ orgId, data: { message: msg, conversationId } } as any);
       const aiRes = res as any;
@@ -127,6 +140,14 @@ export default function AiAssistantPage() {
     setMessages([]);
     setConversationId(null);
     setActiveConvId(null);
+    nextId.current = 1;
+  };
+
+  const selectConversation = (id: number) => {
+    if (id === activeConvId) return;
+    setMessages([]);
+    setLoadingConv(true);
+    setActiveConvId(id);
   };
 
   return (
@@ -143,11 +164,12 @@ export default function AiAssistantPage() {
             (conversations ?? []).map((conv: any) => (
               <div key={conv.id}
                 className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${activeConvId === conv.id ? "bg-accent text-accent-foreground" : "hover:bg-sidebar-accent text-sidebar-foreground"}`}
-                onClick={() => setActiveConvId(conv.id)}
+                onClick={() => selectConversation(conv.id)}
                 data-testid={`conv-${conv.id}`}>
                 <Bot className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
                 <p className="text-xs flex-1 truncate">{conv.title}</p>
-                <button onClick={e => { e.stopPropagation(); deleteConv.mutate({ orgId, conversationId: conv.id }); }}
+                <button
+                  onClick={e => { e.stopPropagation(); deleteConv.mutate({ orgId, conversationId: conv.id }); if (activeConvId === conv.id) newConversation(); }}
                   className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-destructive transition-colors"
                   data-testid={`btn-delete-conv-${conv.id}`}>
                   <Trash2 className="w-3 h-3" />
@@ -162,7 +184,14 @@ export default function AiAssistantPage() {
 
       {/* Chat area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {messages.length === 0 ? (
+        {loadingConv ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span className="text-sm">Loading conversation…</span>
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
             <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
               <Bot className="w-8 h-8 text-primary" />
@@ -201,7 +230,7 @@ export default function AiAssistantPage() {
                 <div className="bg-card border border-border rounded-xl px-4 py-3">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm">Analyzing your infrastructure...</span>
+                    <span className="text-sm">Analyzing your infrastructure…</span>
                   </div>
                 </div>
               </div>
@@ -217,7 +246,7 @@ export default function AiAssistantPage() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-              placeholder="Ask about deployments, troubleshooting, configuration... (Enter to send, Shift+Enter for newline)"
+              placeholder="Ask about deployments, troubleshooting, configuration… (Enter to send, Shift+Enter for newline)"
               className="pr-12 resize-none min-h-[80px] max-h-[200px] font-sans"
               data-testid="input-chat-message"
             />

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Users, Building2, Shield, Trash2 } from "lucide-react";
+import { Plus, Users, Building2, Shield, Trash2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useGetOrganization, useListOrgMembers, useAddOrgMember, useUpdateOrgMember, useRemoveOrgMember, getGetOrganizationQueryKey, getListOrgMembersQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
@@ -14,16 +14,33 @@ const ROLE_CONFIG: Record<string, { label: string; color: string; description: s
   engineer: { label: "Engineer", color: "bg-blue-400/10 text-blue-400", description: "Can create and execute deployments" },
 };
 
+function Toast({ type, message, onClose }: { type: "success" | "error"; message: string; onClose: () => void }) {
+  return (
+    <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium
+      ${type === "success" ? "bg-emerald-950 border-emerald-800 text-emerald-300" : "bg-red-950 border-red-800 text-red-300"}`}>
+      {type === "success" ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+      {message}
+      <button onClick={onClose} className="ml-2 opacity-60 hover:opacity-100">×</button>
+    </div>
+  );
+}
+
 export default function OrganizationPage() {
   const { orgId } = useAuth();
   const qc = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("engineer");
   const [inviting, setInviting] = useState(false);
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const { data: org } = useGetOrganization(orgId, { query: { queryKey: getGetOrganizationQueryKey(orgId) } });
   const { data: members, isLoading } = useListOrgMembers(orgId, { query: { queryKey: getListOrgMembersQueryKey(orgId) } });
   const allMembers = (members ?? []) as any[];
+
+  const showToast = (type: "success" | "error", message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 5000);
+  };
 
   const addMember = useAddOrgMember({
     mutation: {
@@ -31,8 +48,19 @@ export default function OrganizationPage() {
         qc.invalidateQueries({ queryKey: getListOrgMembersQueryKey(orgId) });
         setInviteEmail("");
         setInviting(false);
+        showToast("success", "Member added successfully");
       },
-      onError: () => setInviting(false),
+      onError: (err: any) => {
+        setInviting(false);
+        const status = err?.response?.status ?? err?.status;
+        if (status === 404) {
+          showToast("error", "No account found for this email. Ask them to register first, then add them here.");
+        } else if (status === 409) {
+          showToast("error", "This user is already a member of your organisation.");
+        } else {
+          showToast("error", err?.message ?? "Failed to add member. Please try again.");
+        }
+      },
     },
   });
 
@@ -48,6 +76,8 @@ export default function OrganizationPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
+      {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
+
       {/* Org header */}
       <div className="flex items-start gap-4">
         <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
@@ -77,9 +107,12 @@ export default function OrganizationPage() {
 
       {/* Invite form */}
       <div className="rounded-xl border border-border bg-card p-5">
-        <h2 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Invite a member
+        <h2 className="font-semibold text-foreground mb-1 flex items-center gap-2">
+          <Plus className="w-4 h-4" /> Add a member
         </h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          The person must already have a GuideX account. If they haven't registered yet, ask them to sign up first.
+        </p>
         <form onSubmit={handleInvite} className="flex items-center gap-3">
           <Input
             type="email"
@@ -99,7 +132,7 @@ export default function OrganizationPage() {
             <option value="admin">Admin</option>
           </select>
           <Button type="submit" size="sm" disabled={inviting}>
-            {inviting ? "Inviting…" : "Invite"}
+            {inviting ? "Adding…" : "Add Member"}
           </Button>
         </form>
       </div>
@@ -116,7 +149,7 @@ export default function OrganizationPage() {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Users className="w-10 h-10 text-muted-foreground/40 mb-3" />
             <p className="font-medium text-muted-foreground">No members yet</p>
-            <p className="text-sm text-muted-foreground/60 mt-1">Invite your first team member above</p>
+            <p className="text-sm text-muted-foreground/60 mt-1">Add your first team member above</p>
           </div>
         ) : (
           <div className="divide-y divide-border">

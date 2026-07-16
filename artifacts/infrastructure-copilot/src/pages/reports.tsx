@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, BarChart3, Download, Loader2 } from "lucide-react";
+import { Plus, BarChart3, Download, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useListReports, useGenerateReport, getListReportsQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
@@ -32,21 +32,32 @@ export default function ReportsPage() {
   const qc = useQueryClient();
   const [generating, setGenerating] = useState(false);
   const [selectedType, setSelectedType] = useState("deployment_summary");
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  const { data: reports, isLoading } = useListReports(orgId, { query: { queryKey: getListReportsQueryKey(orgId) } });
+  const queryKey = getListReportsQueryKey(orgId);
+  const { data: reports, isLoading } = useListReports(orgId, { query: { queryKey } });
   const allReports = (reports ?? []) as any[];
+
+  const showToast = (type: "success" | "error", message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const generate = useGenerateReport({
     mutation: {
       onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getListReportsQueryKey(orgId) });
+        qc.invalidateQueries({ queryKey });
         setGenerating(false);
+        showToast("success", "Report generated successfully");
       },
-      onError: () => setGenerating(false),
+      onError: (e: any) => {
+        setGenerating(false);
+        showToast("error", e?.message ?? "Failed to generate report");
+      },
     },
   });
 
-  const handleGenerate = async () => {
+  const handleGenerate = () => {
     setGenerating(true);
     const label = REPORT_TYPES.find(t => t.value === selectedType)?.label ?? selectedType;
     generate.mutate({ orgId, data: { type: selectedType, title: `${label} — ${new Date().toLocaleDateString()}` } } as any);
@@ -54,6 +65,15 @@ export default function ReportsPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-7xl mx-auto">
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium
+          ${toast.type === "success" ? "bg-emerald-950 border-emerald-800 text-emerald-300" : "bg-red-950 border-red-800 text-red-300"}`}>
+          {toast.type === "success" ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          {toast.message}
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Reports</h1>
@@ -94,7 +114,7 @@ export default function ReportsPage() {
                 <p className="text-sm text-muted-foreground">{r.summary}</p>
                 <p className="text-xs text-muted-foreground/60 mt-1">{timeAgo(r.createdAt)}</p>
               </div>
-              <Button variant="ghost" size="sm" className="shrink-0">
+              <Button variant="ghost" size="sm" className="shrink-0" title="Download">
                 <Download className="w-4 h-4" />
               </Button>
             </div>
