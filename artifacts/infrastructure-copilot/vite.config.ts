@@ -72,6 +72,12 @@ export default defineConfig({
     fs: {
       strict: true,
     },
+    proxy: {
+      '/infrastructure-copilot-video': {
+        target: 'http://localhost:25843',
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     port,
