@@ -71,18 +71,6 @@ export default function LoginPage() {
             AI-powered infrastructure management for production-grade teams. Plan, validate, deploy, and monitor with full audit trails.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-4 mt-12">
-          {[
-            { label: "Deployments", value: "2,400+" },
-            { label: "Success Rate", value: "99.2%" },
-            { label: "Servers Managed", value: "850+" },
-          ].map(({ label, value }) => (
-            <div key={label} className="p-4 rounded-xl bg-card border border-border">
-              <p className="text-2xl font-bold text-primary">{value}</p>
-              <p className="text-xs text-muted-foreground mt-1">{label}</p>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* Right panel */}
