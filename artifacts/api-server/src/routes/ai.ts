@@ -1,4 +1,7 @@
 import { Router } from "express";
+import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@workspace/db";
 import { aiConversationsTable, aiMessagesTable, serversTable, templatesTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
@@ -7,104 +10,125 @@ import { authMiddleware, getUser } from "../lib/auth";
 const router = Router();
 router.use(authMiddleware);
 
-// ── Agent personas ─────────────────────────────────────────────────────────────
-const AGENT_PERSONAS: Record<string, { name: string; systemPrompt: string }> = {
-  copilot: {
-    name: "Infrastructure Copilot",
-    systemPrompt: `You are GuideX Infrastructure Copilot — a senior DevOps and Linux infrastructure engineer with 15+ years of experience. You provide precise, practical guidance on server administration, deployments, configuration management, and infrastructure best practices.
+// ── Provider configuration ─────────────────────────────────────────────────────
+type Provider = "gemini" | "openai" | "claude";
 
-Always:
-- Include concrete bash commands with brief explanations
-- Mention risks or caveats when relevant
-- Structure responses with clear headings when the answer is long
-- Suggest verification steps after changes
-Be thorough but concise. Never fabricate command outputs.`,
-  },
-  security: {
-    name: "Security Analyst",
-    systemPrompt: `You are GuideX Security Analyst — an infrastructure security specialist. You focus on hardening servers, auditing configurations, fixing CVEs, managing firewalls, TLS/SSL, and compliance (CIS benchmarks, SOC2, ISO27001).
-
-Always:
-- Explain the risk before the fix
-- Provide hardening commands with expected outcomes
-- Flag any actions that could lock out access
-Never suggest disabling security controls without alternatives.`,
-  },
-  deployment: {
-    name: "Deployment Specialist",
-    systemPrompt: `You are GuideX Deployment Specialist — an expert in CI/CD pipelines, deployment strategies, Docker, Kubernetes, and release engineering. You help design zero-downtime deployments, rollback strategies, and service configuration management.
-
-Always provide:
-- Clear step-by-step deployment procedures
-- Rollback commands alongside deployment commands
-- Health check verification steps`,
-  },
-  troubleshooter: {
-    name: "Troubleshooter",
-    systemPrompt: `You are GuideX Troubleshooter — a systematic diagnostic expert for infrastructure incidents. Use root-cause analysis methodology.
-
-Always start with:
-1. Log analysis commands for the specific issue
-2. Resource utilization checks
-3. Service and network status verification
-Then provide targeted fixes based on findings. Ask clarifying questions if the issue description is vague.`,
-  },
-  database: {
-    name: "Database Administrator",
-    systemPrompt: `You are GuideX Database Administrator — a specialist in PostgreSQL, MySQL, Redis, and MongoDB administration. You handle query optimization, backup strategies, replication, and performance tuning.
-
-Always include:
-- Safe commands that won't disrupt active connections
-- Backup steps before any schema changes
-- Performance impact notes`,
-  },
+const PROVIDERS: Record<Provider, { label: string; model: string }> = {
+  gemini: { label: "Gemini",  model: "gemini-2.5-flash" },
+  openai: { label: "ChatGPT", model: "gpt-5.6-terra" },
+  claude: { label: "Claude",  model: "claude-sonnet-4-6" },
 };
 
-// ── Gemini API helper ──────────────────────────────────────────────────────────
-async function callGemini(
-  messages: Array<{ role: string; content: string }>,
-  systemPrompt: string
-): Promise<string> {
-  const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
-  const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
+// ── Shared infrastructure system prompt ───────────────────────────────────────
+const SYSTEM_PROMPT = `You are GuideX AI — a senior DevOps and infrastructure engineer with 15+ years of experience across Linux server administration, CI/CD pipelines, cloud deployments, security hardening, and database management.
 
-  if (!baseUrl || !apiKey) {
-    throw new Error("Gemini AI service not configured");
+Always:
+- Provide concrete, copy-paste-ready bash commands with brief explanations
+- Structure long answers with clear headings (## Section) and bullet points
+- Mention risks or caveats when relevant
+- Suggest verification steps after any changes
+- Use code blocks for all commands, scripts, and config snippets
+
+Cover: server hardening, deployments, Docker/Kubernetes, Nginx, SSL/TLS, firewalls, PostgreSQL/MySQL/Redis, monitoring, log analysis, and CI/CD pipelines.
+
+Be thorough but concise. Never fabricate command outputs.`;
+
+// ── SDK clients (lazy, initialized on first use) ──────────────────────────────
+let _gemini: GoogleGenAI | null = null;
+let _openai: OpenAI | null = null;
+let _claude: Anthropic | null = null;
+
+function getGemini(): GoogleGenAI {
+  if (!_gemini) {
+    const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
+    const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
+    if (!apiKey || !baseUrl) throw new Error("Gemini not configured");
+    _gemini = new GoogleGenAI({ apiKey, httpOptions: { baseUrl } });
+  }
+  return _gemini;
+}
+
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
+    const baseURL = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
+    if (!apiKey || !baseURL) throw new Error("OpenAI not configured");
+    _openai = new OpenAI({ apiKey, baseURL });
+  }
+  return _openai;
+}
+
+function getClaude(): Anthropic {
+  if (!_claude) {
+    const apiKey = process.env["AI_INTEGRATIONS_ANTHROPIC_API_KEY"];
+    const baseURL = process.env["AI_INTEGRATIONS_ANTHROPIC_BASE_URL"];
+    if (!apiKey || !baseURL) throw new Error("Anthropic not configured");
+    _claude = new Anthropic({ apiKey, baseURL });
+  }
+  return _claude;
+}
+
+// ── Unified AI call ───────────────────────────────────────────────────────────
+async function callAI(
+  provider: Provider,
+  messages: Array<{ role: string; content: string }>,
+  systemPrompt: string = SYSTEM_PROMPT
+): Promise<string> {
+  if (provider === "gemini") {
+    const ai = getGemini();
+    const response = await ai.models.generateContent({
+      model: PROVIDERS.gemini.model,
+      contents: messages.map(m => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      })),
+      config: {
+        systemInstruction: systemPrompt,
+        maxOutputTokens: 8192,
+      },
+    });
+    return response.text ?? "No response generated.";
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gemini-2.0-flash",
+  if (provider === "openai") {
+    const ai = getOpenAI();
+    const response = await ai.chat.completions.create({
+      model: PROVIDERS.openai.model,
+      max_completion_tokens: 8192,
       messages: [
         { role: "system", content: systemPrompt },
-        ...messages,
+        ...messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
       ],
-      temperature: 0.7,
-      max_tokens: 2048,
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${errText}`);
+    });
+    return response.choices[0]?.message?.content ?? "No response generated.";
   }
 
-  const data = await response.json() as any;
-  return data.choices?.[0]?.message?.content ?? "I could not generate a response. Please try again.";
+  if (provider === "claude") {
+    const ai = getClaude();
+    const response = await ai.messages.create({
+      model: PROVIDERS.claude.model,
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: messages.map(m => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: m.content,
+      })) as Anthropic.MessageParam[],
+    });
+    const block = response.content[0];
+    return block?.type === "text" ? block.text : "No response generated.";
+  }
+
+  throw new Error(`Unknown provider: ${provider}`);
 }
 
 // ── POST /organizations/:orgId/ai/chat ─────────────────────────────────────────
 router.post("/organizations/:orgId/ai/chat", async (req, res) => {
   const orgId = parseInt(req.params["orgId"] ?? "0");
   const user = getUser(req);
-  const { message, conversationId, agentId } = req.body;
+  const { message, conversationId, provider: rawProvider } = req.body;
 
-  const persona = AGENT_PERSONAS[agentId as string] ?? AGENT_PERSONAS["copilot"]!;
+  const provider: Provider = (["gemini", "openai", "claude"].includes(rawProvider) ? rawProvider : "gemini") as Provider;
+  const providerLabel = PROVIDERS[provider].label;
 
   // Upsert conversation
   let convId = conversationId;
@@ -121,7 +145,7 @@ router.post("/organizations/:orgId/ai/chat", async (req, res) => {
   // Save user message
   await db.insert(aiMessagesTable).values({ conversationId: convId, role: "user", content: message });
 
-  // Load conversation history for context (last 20 messages)
+  // Load conversation history (last 20 messages)
   const history = await db
     .select({ role: aiMessagesTable.role, content: aiMessagesTable.content })
     .from(aiMessagesTable)
@@ -136,10 +160,10 @@ router.post("/organizations/:orgId/ai/chat", async (req, res) => {
 
   let aiText: string;
   try {
-    aiText = await callGemini(historyMessages, persona.systemPrompt);
+    aiText = await callAI(provider, historyMessages, SYSTEM_PROMPT);
   } catch (err: any) {
-    console.error("[ai/chat] Gemini error:", err);
-    aiText = `⚠️ AI service temporarily unavailable. Error: ${err?.message ?? "Unknown error"}`;
+    console.error(`[ai/chat] ${providerLabel} error:`, err);
+    aiText = `⚠️ ${providerLabel} is temporarily unavailable. Error: ${err?.message ?? "Unknown error"}`;
   }
 
   await db.insert(aiMessagesTable).values({ conversationId: convId, role: "assistant", content: aiText });
@@ -147,11 +171,12 @@ router.post("/organizations/:orgId/ai/chat", async (req, res) => {
   res.json({
     message: aiText,
     conversationId: convId,
-    agentId: agentId ?? "copilot",
-    agentName: persona.name,
+    provider,
+    providerLabel,
   });
 });
 
+// ── GET /organizations/:orgId/ai/conversations ─────────────────────────────────
 router.get("/organizations/:orgId/ai/conversations", async (req, res) => {
   const orgId = parseInt(req.params["orgId"] ?? "0");
   const user = getUser(req);
@@ -165,6 +190,7 @@ router.get("/organizations/:orgId/ai/conversations", async (req, res) => {
   res.json(result);
 });
 
+// ── GET /organizations/:orgId/ai/conversations/:conversationId ─────────────────
 router.get("/organizations/:orgId/ai/conversations/:conversationId", async (req, res) => {
   const conversationId = parseInt(req.params["conversationId"] ?? "0");
   const [conv] = await db.select().from(aiConversationsTable).where(eq(aiConversationsTable.id, conversationId)).limit(1);
@@ -173,29 +199,30 @@ router.get("/organizations/:orgId/ai/conversations/:conversationId", async (req,
   res.json({ ...conv, messages });
 });
 
+// ── DELETE /organizations/:orgId/ai/conversations/:conversationId ──────────────
 router.delete("/organizations/:orgId/ai/conversations/:conversationId", async (req, res) => {
   const conversationId = parseInt(req.params["conversationId"] ?? "0");
   await db.delete(aiConversationsTable).where(eq(aiConversationsTable.id, conversationId));
   res.status(204).end();
 });
 
+// ── POST /organizations/:orgId/ai/analyze-deployment ──────────────────────────
 router.post("/organizations/:orgId/ai/analyze-deployment", async (req, res) => {
   const { serverId, templateId } = req.body;
   const [server] = await db.select().from(serversTable).where(eq(serversTable.id, serverId)).limit(1);
   const [template] = await db.select().from(templatesTable).where(eq(templatesTable.id, templateId)).limit(1);
 
-  const systemPrompt = AGENT_PERSONAS["deployment"]!.systemPrompt;
   const analysisPrompt = `Analyze this deployment plan and return a structured JSON analysis:
 
 Server: ${server?.name ?? "Unknown"} (${server?.host ?? "unknown"}, ${server?.os ?? "unknown"} ${server?.osVersion ?? ""})
 Template: ${template?.name ?? "Unknown"} — ${template?.description ?? ""}
 Script/Steps: ${template?.scriptContent ? template.scriptContent.substring(0, 1000) : JSON.stringify(template?.steps?.slice(0, 5) ?? [])}
 
-Return JSON with: { summary, whyRequired, benefits (array), risks (array of {description, severity, mitigation}), dependencies (array), estimatedDuration (seconds), estimatedDowntime (seconds), rollbackStrategy, expectedOutcome }`;
+Return JSON ONLY with: { summary, whyRequired, benefits (array), risks (array of {description, severity, mitigation}), dependencies (array), estimatedDuration (seconds), estimatedDowntime (seconds), rollbackStrategy, expectedOutcome }`;
 
   let analysis;
   try {
-    const text = await callGemini([{ role: "user", content: analysisPrompt }], systemPrompt);
+    const text = await callAI("gemini", [{ role: "user", content: analysisPrompt }], SYSTEM_PROMPT);
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     try { analysis = JSON.parse(cleaned); } catch { analysis = null; }
   } catch { analysis = null; }
@@ -227,15 +254,16 @@ Return JSON with: { summary, whyRequired, benefits (array), risks (array of {des
   });
 });
 
+// ── POST /organizations/:orgId/ai/troubleshoot ─────────────────────────────────
 router.post("/organizations/:orgId/ai/troubleshoot", async (req, res) => {
   const { description } = req.body;
-  const systemPrompt = AGENT_PERSONAS["troubleshooter"]!.systemPrompt;
 
   let result;
   try {
-    const prompt = `Troubleshoot this infrastructure issue and return JSON: ${description}
+    const prompt = `Troubleshoot this infrastructure issue and return JSON ONLY:
+Issue: ${description}
 Return: { rootCause, explanation, severity (critical/high/medium/low), recommendations (array of {action, command, explanation}) }`;
-    const text = await callGemini([{ role: "user", content: prompt }], systemPrompt);
+    const text = await callAI("gemini", [{ role: "user", content: prompt }], SYSTEM_PROMPT);
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     try { result = JSON.parse(cleaned); } catch { result = null; }
   } catch { result = null; }

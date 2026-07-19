@@ -79,31 +79,19 @@ router.post("/organizations/:orgId/templates/analyze", async (req, res) => {
     return;
   }
 
-  const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
   const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
+  const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
 
-  if (!baseUrl || !apiKey) {
+  if (!apiKey || !baseUrl) {
     res.status(503).json({ error: "AI service not configured" });
     return;
   }
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gemini-2.0-flash",
-        messages: [
-          {
-            role: "system",
-            content: "You are an infrastructure engineer. Analyze shell/bash scripts and return structured information.",
-          },
-          {
-            role: "user",
-            content: `Analyze this script and return ONLY valid JSON (no markdown, no code fences) with these fields:
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl } });
+
+    const prompt = `Analyze this shell/bash script and return ONLY valid JSON (no markdown, no code fences) with these fields:
 {
   "software": "the main software package being installed or configured (e.g. nginx, docker, postgresql)",
   "description": "one sentence describing what this script does",
@@ -111,20 +99,18 @@ router.post("/organizations/:orgId/templates/analyze", async (req, res) => {
 }
 
 Script:
-${scriptContent.substring(0, 3000)}`,
-          },
-        ],
-        temperature: 0.2,
-      }),
+${scriptContent.substring(0, 3000)}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        systemInstruction: "You are an infrastructure engineer. Analyze shell/bash scripts and return structured JSON information only.",
+        maxOutputTokens: 512,
+      },
     });
 
-    if (!response.ok) {
-      throw new Error(`AI API returned ${response.status}`);
-    }
-
-    const data = await response.json() as any;
-    const text = (data.choices?.[0]?.message?.content ?? "{}") as string;
-
+    const text = response.text ?? "{}";
     let result: { software: string; description: string; name: string };
     try {
       const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
