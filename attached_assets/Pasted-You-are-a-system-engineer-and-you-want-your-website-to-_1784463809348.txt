@@ -1,0 +1,32 @@
+You are a system engineer and you want your website to be more efficient.
+
+
+1- Server tab 
+- Remove the word 'Fleet'
+- When adding a server, the only options that should appear are Display name(required), client/project (required), deployment(online, offline) (required), ip address/hostname (required), ssh port (required), ssh username (required), ssh password (not required), notes (not required). Remove Operation system. The user must add the required fields.
+- Server status filter, let them be All statuses, online, offline.
+- The refresh button besides the server filters is not working.
+- Action buttons in server tab
+  - The test connection button must do a quick test whether the port is open or not, if yes successful or no not successful.
+  - The open SSH terminal button, successfully opens the terminal and allows user to enter the password but doesn't allow typing in the terminal, I want the system engineer to be able to perform the commands either form this terminal or connect it to any other terminal.
+  - The view details shows wrong data, the website must not display any wrong data anywhere. Instead, when the user clicks on scan button or connects to the server through an SSH connection it scan the server and its components.
+  - Add delete server button.
+2- Deployments tab 
+- The deployments must actually run on the servers where the template must have real content that allows the user to interact with it.
+3- Templates tab 
+- When adding a template name (required). First of all, there should be a place where the user adds the template/script and the AI must view and analyze it and components so that it autofill the rest of the placeholders, software package [write a placeholder where it shows that in this line the user must enter what does this template or package contain] (required), remove version and category and os requirements. 
+- When the user clicks on the templates allow them to view its content and also add a delete and an edit button.
+4- Monitoring tab 
+- Must display ONLY CORRECT DATA.
+5- AI Assistant tab
+- Connect this to GEMINI as default and add multiple efficient AI agents and allow the user to choose which AI agent they need to be in their project.
+6- Audit Logs tab
+- The logs are impressable fix IF & ONLY IF they must be pressable.
+7- Documents tab
+- Allow the documents generation as for 2 ways either the first way is as templates where you keep placeholders for them and the user fills the templates manually, the second way is as the user chooses which deployment they want to create a report for and etc. 
+- Add an SRS document template too.
+8- Reports tab 
+- Allow the user to generate reports but for specific things like for a specific server, deployment process etc.
+9- Organization tab
+- Remove the admins that are not working and keep the working one only.
+- Allow the admin to create an account without asking the user to create their account first. But if the user creates an account the admin must accept it.
