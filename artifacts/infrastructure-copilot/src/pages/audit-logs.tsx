@@ -32,8 +32,9 @@ export default function AuditLogsPage() {
   const { orgId } = useAuth();
   const [search, setSearch] = useState("");
 
-  const { data: logs, isLoading } = useListAuditLogs(orgId, {}, { query: { queryKey: getListAuditLogsQueryKey(orgId, {}) } });
-  const allLogs = (logs ?? []) as any[];
+  const { data: logsRaw, isLoading } = useListAuditLogs(orgId, {}, { query: { queryKey: getListAuditLogsQueryKey(orgId, {}) } });
+  // API returns { items: [], total: N } — flatten gracefully
+  const allLogs = (Array.isArray(logsRaw) ? logsRaw : (logsRaw as any)?.items ?? []) as any[];
   const filtered = allLogs.filter(l =>
     !search ||
     l.action?.toLowerCase().includes(search.toLowerCase()) ||

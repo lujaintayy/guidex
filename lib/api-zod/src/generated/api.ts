@@ -288,9 +288,11 @@ export const ListServersQueryParams = zod.object({
 export const ListServersResponseItem = zod.object({
   "id": zod.number(),
   "name": zod.string(),
+  "clientName": zod.string().nullish(),
   "host": zod.string(),
   "sshPort": zod.number(),
   "sshUsername": zod.string(),
+  "sshAuthMethod": zod.string().nullish(),
   "os": zod.string(),
   "osVersion": zod.string().nullish(),
   "status": zod.enum(['online', 'offline', 'unknown', 'maintenance']),
@@ -302,6 +304,9 @@ export const ListServersResponseItem = zod.object({
   "cpuUsage": zod.number().nullish(),
   "memUsage": zod.number().nullish(),
   "diskUsage": zod.number().nullish(),
+  "scanData": zod.object({
+
+}).nullish().describe('Latest scan results (populated after a successful scan)'),
   "createdAt": zod.coerce.date()
 })
 export const ListServersResponse = zod.array(ListServersResponseItem)
@@ -315,12 +320,16 @@ export const CreateServerParams = zod.object({
 })
 
 export const createServerBodySshPortDefault = 22;
+export const createServerBodySshAuthMethodDefault = `password`;
 
 export const CreateServerBody = zod.object({
   "name": zod.string(),
+  "clientName": zod.string().optional().describe('Client or customer this server belongs to'),
   "host": zod.string(),
   "sshPort": zod.number().default(createServerBodySshPortDefault),
   "sshUsername": zod.string(),
+  "sshAuthMethod": zod.enum(['password', 'key', 'none']).default(createServerBodySshAuthMethodDefault),
+  "sshPassword": zod.string().optional().describe('SSH password or private key content (stored securely)'),
   "sshKeyId": zod.number().nullish(),
   "os": zod.enum(['ubuntu', 'debian', 'rhel', 'centos', 'windows', 'other']),
   "osVersion": zod.string().optional(),
@@ -332,9 +341,11 @@ export const CreateServerBody = zod.object({
 export const CreateServerResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
+  "clientName": zod.string().nullish(),
   "host": zod.string(),
   "sshPort": zod.number(),
   "sshUsername": zod.string(),
+  "sshAuthMethod": zod.string().nullish(),
   "os": zod.string(),
   "osVersion": zod.string().nullish(),
   "status": zod.enum(['online', 'offline', 'unknown', 'maintenance']),
@@ -346,6 +357,9 @@ export const CreateServerResponse = zod.object({
   "cpuUsage": zod.number().nullish(),
   "memUsage": zod.number().nullish(),
   "diskUsage": zod.number().nullish(),
+  "scanData": zod.object({
+
+}).nullish().describe('Latest scan results (populated after a successful scan)'),
   "createdAt": zod.coerce.date()
 })
 
@@ -361,9 +375,11 @@ export const GetServerParams = zod.object({
 export const GetServerResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
+  "clientName": zod.string().nullish(),
   "host": zod.string(),
   "sshPort": zod.number(),
   "sshUsername": zod.string(),
+  "sshAuthMethod": zod.string().nullish(),
   "os": zod.string(),
   "osVersion": zod.string().nullish(),
   "status": zod.enum(['online', 'offline', 'unknown', 'maintenance']),
@@ -375,6 +391,9 @@ export const GetServerResponse = zod.object({
   "cpuUsage": zod.number().nullish(),
   "memUsage": zod.number().nullish(),
   "diskUsage": zod.number().nullish(),
+  "scanData": zod.object({
+
+}).nullish().describe('Latest scan results (populated after a successful scan)'),
   "createdAt": zod.coerce.date()
 })
 
@@ -397,9 +416,11 @@ export const UpdateServerBody = zod.object({
 export const UpdateServerResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
+  "clientName": zod.string().nullish(),
   "host": zod.string(),
   "sshPort": zod.number(),
   "sshUsername": zod.string(),
+  "sshAuthMethod": zod.string().nullish(),
   "os": zod.string(),
   "osVersion": zod.string().nullish(),
   "status": zod.enum(['online', 'offline', 'unknown', 'maintenance']),
@@ -411,6 +432,9 @@ export const UpdateServerResponse = zod.object({
   "cpuUsage": zod.number().nullish(),
   "memUsage": zod.number().nullish(),
   "diskUsage": zod.number().nullish(),
+  "scanData": zod.object({
+
+}).nullish().describe('Latest scan results (populated after a successful scan)'),
   "createdAt": zod.coerce.date()
 })
 

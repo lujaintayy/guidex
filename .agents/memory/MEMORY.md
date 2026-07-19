@@ -1,0 +1,3 @@
+- [Admin login recovery](admin-login-recovery.md) — password_hash can become literal "password" after task-agent merges; seed-admin now always re-hashes on startup.
+- [Zod v3 generated schemas](zod-codegen-compat.md) — orval codegen produces `z.looseObject` (zod v4) but project uses zod v3; must patch generated api.ts manually after spec changes.
+- [Audit logs API shape](audit-logs-shape.md) — audit logs API returns `{ items, total }` not a plain array; frontend must unwrap with `(Array.isArray(r) ? r : r?.items ?? [])`.

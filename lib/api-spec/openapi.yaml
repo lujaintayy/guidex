@@ -1607,6 +1607,9 @@ components:
       properties:
         name:
           type: string
+        clientName:
+          type: string
+          description: Client or customer this server belongs to
         host:
           type: string
         sshPort:
@@ -1614,6 +1617,13 @@ components:
           default: 22
         sshUsername:
           type: string
+        sshAuthMethod:
+          type: string
+          enum: [password, key, none]
+          default: password
+        sshPassword:
+          type: string
+          description: SSH password or private key content (stored securely)
         sshKeyId:
           type: ["integer", "null"]
         os:
@@ -1652,12 +1662,16 @@ components:
           type: integer
         name:
           type: string
+        clientName:
+          type: ["string", "null"]
         host:
           type: string
         sshPort:
           type: integer
         sshUsername:
           type: string
+        sshAuthMethod:
+          type: ["string", "null"]
         os:
           type: string
         osVersion:
@@ -1684,6 +1698,9 @@ components:
           type: ["number", "null"]
         diskUsage:
           type: ["number", "null"]
+        scanData:
+          type: ["object", "null"]
+          description: Latest scan results (populated after a successful scan)
         createdAt:
           type: string
           format: date-time

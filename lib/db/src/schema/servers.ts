@@ -19,18 +19,26 @@ export const serversTable = pgTable("servers", {
   id: serial("id").primaryKey(),
   orgId: integer("org_id").notNull().references(() => organizationsTable.id, { onDelete: "cascade" }),
   groupId: integer("group_id").references(() => serverGroupsTable.id, { onDelete: "set null" }),
+  // Identity
   name: varchar("name", { length: 255 }).notNull(),
+  clientName: varchar("client_name", { length: 255 }),
   host: varchar("host", { length: 255 }).notNull(),
   sshPort: integer("ssh_port").notNull().default(22),
   sshUsername: varchar("ssh_username", { length: 100 }).notNull(),
+  // Auth — 'password' | 'key' | 'none'
+  sshAuthMethod: varchar("ssh_auth_method", { length: 20 }).default("password"),
+  sshPassword: text("ssh_password"),
   os: serverOsEnum("os").notNull(),
   osVersion: varchar("os_version", { length: 100 }),
   status: serverStatusEnum("status").notNull().default("unknown"),
   tags: jsonb("tags").$type<string[]>().default([]),
   description: text("description"),
+  // Live metrics (updated by scan / health poll)
   cpuUsage: integer("cpu_usage"),
   memUsage: integer("mem_usage"),
   diskUsage: integer("disk_usage"),
+  // Full scan result payload (JSON)
+  scanData: jsonb("scan_data").$type<Record<string, unknown>>(),
   lastSeen: timestamp("last_seen"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

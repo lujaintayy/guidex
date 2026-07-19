@@ -122,6 +122,15 @@ export interface OrgMember {
   joinedAt: string;
 }
 
+export type ServerInputSshAuthMethod = typeof ServerInputSshAuthMethod[keyof typeof ServerInputSshAuthMethod];
+
+
+export const ServerInputSshAuthMethod = {
+  password: 'password',
+  key: 'key',
+  none: 'none',
+} as const;
+
 export type ServerInputOs = typeof ServerInputOs[keyof typeof ServerInputOs];
 
 
@@ -136,9 +145,14 @@ export const ServerInputOs = {
 
 export interface ServerInput {
   name: string;
+  /** Client or customer this server belongs to */
+  clientName?: string;
   host: string;
   sshPort: number;
   sshUsername: string;
+  sshAuthMethod?: ServerInputSshAuthMethod;
+  /** SSH password or private key content (stored securely) */
+  sshPassword?: string;
   /** @nullable */
   sshKeyId?: number | null;
   os: ServerInputOs;
@@ -167,12 +181,22 @@ export const ServerStatus = {
   maintenance: 'maintenance',
 } as const;
 
+/**
+ * Latest scan results (populated after a successful scan)
+ * @nullable
+ */
+export type ServerScanData = { [key: string]: unknown } | null;
+
 export interface Server {
   id: number;
   name: string;
+  /** @nullable */
+  clientName?: string | null;
   host: string;
   sshPort: number;
   sshUsername: string;
+  /** @nullable */
+  sshAuthMethod?: string | null;
   os: string;
   /** @nullable */
   osVersion?: string | null;
@@ -192,6 +216,11 @@ export interface Server {
   memUsage?: number | null;
   /** @nullable */
   diskUsage?: number | null;
+  /**
+     * Latest scan results (populated after a successful scan)
+     * @nullable
+     */
+  scanData?: ServerScanData;
   createdAt: string;
 }
 
