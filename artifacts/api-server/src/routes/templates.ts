@@ -89,7 +89,7 @@ router.post("/organizations/:orgId/templates/analyze", async (req, res) => {
 
   try {
     const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl } });
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl, apiVersion: "" } });
 
     const prompt = `Analyze this shell/bash script and return ONLY valid JSON (no markdown, no code fences) with these fields:
 {

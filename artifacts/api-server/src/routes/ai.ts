@@ -19,19 +19,7 @@ const PROVIDERS: Record<Provider, { label: string; model: string }> = {
   claude: { label: "Claude",  model: "claude-sonnet-4-6" },
 };
 
-// ── Shared infrastructure system prompt ───────────────────────────────────────
-const SYSTEM_PROMPT = `You are GuideX AI — a senior DevOps and infrastructure engineer with 15+ years of experience across Linux server administration, CI/CD pipelines, cloud deployments, security hardening, and database management.
-
-Always:
-- Provide concrete, copy-paste-ready bash commands with brief explanations
-- Structure long answers with clear headings (## Section) and bullet points
-- Mention risks or caveats when relevant
-- Suggest verification steps after any changes
-- Use code blocks for all commands, scripts, and config snippets
-
-Cover: server hardening, deployments, Docker/Kubernetes, Nginx, SSL/TLS, firewalls, PostgreSQL/MySQL/Redis, monitoring, log analysis, and CI/CD pipelines.
-
-Be thorough but concise. Never fabricate command outputs.`;
+// No system prompt — each provider behaves as its native self
 
 // ── SDK clients (lazy, initialized on first use) ──────────────────────────────
 let _gemini: GoogleGenAI | null = null;
@@ -43,7 +31,8 @@ function getGemini(): GoogleGenAI {
     const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
     const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
     if (!apiKey || !baseUrl) throw new Error("Gemini not configured");
-    _gemini = new GoogleGenAI({ apiKey, httpOptions: { baseUrl } });
+    // apiVersion: "" strips the /v1beta/ prefix that Replit's proxy doesn't support
+    _gemini = new GoogleGenAI({ apiKey, httpOptions: { baseUrl, apiVersion: "" } });
   }
   return _gemini;
 }
@@ -71,8 +60,7 @@ function getClaude(): Anthropic {
 // ── Unified AI call ───────────────────────────────────────────────────────────
 async function callAI(
   provider: Provider,
-  messages: Array<{ role: string; content: string }>,
-  systemPrompt: string = SYSTEM_PROMPT
+  messages: Array<{ role: string; content: string }>
 ): Promise<string> {
   if (provider === "gemini") {
     const ai = getGemini();
@@ -82,10 +70,7 @@ async function callAI(
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }],
       })),
-      config: {
-        systemInstruction: systemPrompt,
-        maxOutputTokens: 8192,
-      },
+      config: { maxOutputTokens: 8192 },
     });
     return response.text ?? "No response generated.";
   }
@@ -95,10 +80,7 @@ async function callAI(
     const response = await ai.chat.completions.create({
       model: PROVIDERS.openai.model,
       max_completion_tokens: 8192,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-      ],
+      messages: messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
     });
     return response.choices[0]?.message?.content ?? "No response generated.";
   }
@@ -108,7 +90,6 @@ async function callAI(
     const response = await ai.messages.create({
       model: PROVIDERS.claude.model,
       max_tokens: 8192,
-      system: systemPrompt,
       messages: messages.map(m => ({
         role: m.role === "assistant" ? "assistant" : "user",
         content: m.content,
@@ -160,7 +141,7 @@ router.post("/organizations/:orgId/ai/chat", async (req, res) => {
 
   let aiText: string;
   try {
-    aiText = await callAI(provider, historyMessages, SYSTEM_PROMPT);
+    aiText = await callAI(provider, historyMessages);
   } catch (err: any) {
     console.error(`[ai/chat] ${providerLabel} error:`, err);
     aiText = `⚠️ ${providerLabel} is temporarily unavailable. Error: ${err?.message ?? "Unknown error"}`;
@@ -222,7 +203,7 @@ Return JSON ONLY with: { summary, whyRequired, benefits (array), risks (array of
 
   let analysis;
   try {
-    const text = await callAI("gemini", [{ role: "user", content: analysisPrompt }], SYSTEM_PROMPT);
+    const text = await callAI("gemini", [{ role: "user", content: analysisPrompt }]);
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     try { analysis = JSON.parse(cleaned); } catch { analysis = null; }
   } catch { analysis = null; }
@@ -263,7 +244,7 @@ router.post("/organizations/:orgId/ai/troubleshoot", async (req, res) => {
     const prompt = `Troubleshoot this infrastructure issue and return JSON ONLY:
 Issue: ${description}
 Return: { rootCause, explanation, severity (critical/high/medium/low), recommendations (array of {action, command, explanation}) }`;
-    const text = await callAI("gemini", [{ role: "user", content: prompt }], SYSTEM_PROMPT);
+    const text = await callAI("gemini", [{ role: "user", content: prompt }]);
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     try { result = JSON.parse(cleaned); } catch { result = null; }
   } catch { result = null; }
