@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, FileText, Download, Trash2, Loader2, CheckCircle2, AlertCircle, Eye, X, Server, Layers } from "lucide-react";
+import { Plus, FileText, Download, Trash2, Loader2, CheckCircle2, AlertCircle, Eye, X, Server, Sparkles } from "lucide-react";
 import {
   useListDocuments, useGenerateDocument, useDeleteDocument, getListDocumentsQueryKey,
   useListServers, getListServersQueryKey,
@@ -91,7 +91,6 @@ function GenerateDialog({
 }: {
   orgId: number; servers: any[]; onClose: () => void; onSuccess: () => void;
 }) {
-  const [mode, setMode] = useState<"template" | "server">("template");
   const [docType, setDocType] = useState("sop");
   const [title, setTitle] = useState("");
   const [selectedServerId, setSelectedServerId] = useState("");
@@ -101,7 +100,7 @@ function GenerateDialog({
   const generate = useGenerateDocument({
     mutation: {
       onSuccess: () => { setGenerating(false); onSuccess(); onClose(); },
-      onError: (e: any) => { setGenerating(false); setError(e?.message ?? "Failed"); },
+      onError: (e: any) => { setGenerating(false); setError(e?.message ?? "Generation failed. Please try again."); },
     },
   });
 
@@ -116,54 +115,25 @@ function GenerateDialog({
       data: {
         type: docType,
         title: finalTitle,
-        mode,
-        serverId: mode === "server" && selectedServerId ? parseInt(selectedServerId) : undefined,
-        prompt: `Generate ${label}`,
+        serverId: selectedServerId ? parseInt(selectedServerId) : undefined,
       } as any,
     });
   };
+
+  const selectedServer = servers.find((s: any) => String(s.id) === selectedServerId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="w-full max-w-lg rounded-2xl border border-border bg-card shadow-2xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div className="flex items-center gap-2">
-            <Plus className="w-4 h-4 text-primary" />
+            <Sparkles className="w-4 h-4 text-primary" />
             <h2 className="font-semibold text-foreground">Generate Document</h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"><X className="w-4 h-4" /></button>
         </div>
 
         <form onSubmit={handleGenerate} className="p-6 space-y-5">
-          {/* Mode selector */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-2 block">Generation Mode</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setMode("template")}
-                className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-colors ${mode === "template" ? "border-primary/60 bg-primary/5" : "border-border hover:bg-muted"}`}
-              >
-                <Layers className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-xs font-medium text-foreground">Placeholder Template</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Structured template with fields to fill in</p>
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("server")}
-                className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-colors ${mode === "server" ? "border-primary/60 bg-primary/5" : "border-border hover:bg-muted"}`}
-              >
-                <Server className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-xs font-medium text-foreground">Server Report</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Report scoped to a specific server</p>
-                </div>
-              </button>
-            </div>
-          </div>
-
           {/* Document type */}
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Document Type *</label>
@@ -176,22 +146,30 @@ function GenerateDialog({
             </select>
           </div>
 
-          {/* Server selector (server mode) */}
-          {mode === "server" && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Server <span className="opacity-50">(optional)</span></label>
-              <select
-                value={selectedServerId}
-                onChange={e => setSelectedServerId(e.target.value)}
-                className="w-full h-9 rounded-md border border-border bg-background text-sm px-3 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">— All servers —</option>
-                {servers.map((s: any) => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.host})</option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* Server selector */}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              Server <span className="opacity-50">(optional — AI uses server data to fill the document)</span>
+            </label>
+            <select
+              value={selectedServerId}
+              onChange={e => setSelectedServerId(e.target.value)}
+              className="w-full h-9 rounded-md border border-border bg-background text-sm px-3 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">— No specific server —</option>
+              {servers.map((s: any) => (
+                <option key={`server-${s.id}`} value={String(s.id)}>{s.name} ({s.host})</option>
+              ))}
+            </select>
+            {selectedServer && (
+              <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground bg-muted/40 rounded-lg px-3 py-2">
+                <Server className="w-3 h-3 shrink-0" />
+                <span>{selectedServer.os} · {selectedServer.host} · {selectedServer.status}</span>
+                {selectedServer.cpuUsage != null && <span>· CPU {selectedServer.cpuUsage}%</span>}
+                {selectedServer.memUsage != null && <span>· RAM {selectedServer.memUsage}%</span>}
+              </div>
+            )}
+          </div>
 
           {/* Title */}
           <div>
@@ -205,10 +183,17 @@ function GenerateDialog({
 
           {error && <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>}
 
+          {generating && (
+            <p className="text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2 flex items-center gap-2">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              AI is writing your document — this takes 15–30 seconds…
+            </p>
+          )}
+
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={generating}>Cancel</Button>
             <Button type="submit" size="sm" disabled={generating}>
-              {generating ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating…</> : "Generate Document"}
+              {generating ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating…</> : <><Sparkles className="w-4 h-4 mr-2" />Generate with AI</>}
             </Button>
           </div>
         </form>

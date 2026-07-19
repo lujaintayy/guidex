@@ -3,7 +3,7 @@ import { organizationsTable } from "./organizations";
 
 export const documentTypeEnum = pgEnum("document_type", [
   "deployment_report", "installation_report", "architecture_doc", "sop",
-  "rollback_doc", "troubleshooting_report", "audit_summary"
+  "rollback_doc", "troubleshooting_report", "audit_summary", "srs"
 ]);
 
 export const documentFormatEnum = pgEnum("document_format", ["markdown", "html", "text"]);

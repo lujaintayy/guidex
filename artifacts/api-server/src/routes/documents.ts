@@ -19,310 +19,116 @@ function getGemini(): GoogleGenAI {
 const router = Router();
 router.use(authMiddleware);
 
-// Document templates — produce placeholder-rich markdown the user fills in
-const DOC_TEMPLATES: Record<string, (title: string, context?: any) => string> = {
-  deployment_report: (title, ctx) => `# Deployment Report: ${title}
-
-**Date:** ${new Date().toLocaleDateString()}
-**Server:** ${ctx?.serverName ?? "[SERVER NAME]"}
-**Deployment:** ${ctx?.deploymentName ?? "[DEPLOYMENT NAME]"}
-**Engineer:** [YOUR NAME]
-
----
-
-## Summary
-
-[Describe the deployment outcome — success/failure, key changes made]
-
-## Steps Executed
-
-| # | Step | Status | Notes |
-|---|------|--------|-------|
-| 1 | Pre-flight check | [PASS/FAIL] | [notes] |
-| 2 | Package installation | [PASS/FAIL] | [notes] |
-| 3 | Configuration | [PASS/FAIL] | [notes] |
-| 4 | Service startup | [PASS/FAIL] | [notes] |
-| 5 | Health verification | [PASS/FAIL] | [notes] |
-
-## Metrics
-
-- **Duration:** [X minutes Y seconds]
-- **Downtime:** [X seconds / none]
-- **Rollback required:** [Yes/No]
-
-## Post-Deployment Verification
-
-- Service status: [active/inactive]
-- Port accessibility: [confirmed/not tested]
-- Health endpoint: [responding/not available]
-
-## Issues Encountered
-
-[List any issues or leave "None"]
-
-## Conclusion
-
-[Summary of result and any follow-up actions needed]
-`,
-
-  sop: (title) => `# Standard Operating Procedure: ${title}
-
-**Document ID:** SOP-[NUMBER]
-**Version:** 1.0
-**Effective Date:** ${new Date().toLocaleDateString()}
-**Review Date:** [DATE + 1 YEAR]
-**Owner:** [TEAM/ROLE]
-
----
-
-## Purpose
-
-[Describe the purpose of this SOP]
-
-## Scope
-
-[Who this applies to and what systems/environments are covered]
-
-## Prerequisites
-
-- [ ] [Prerequisite 1 — e.g. SSH access to target server]
-- [ ] [Prerequisite 2 — e.g. Change request approved]
-- [ ] [Prerequisite 3 — e.g. Backup completed]
-
-## Procedure
-
-### Step 1: Preparation
-
-\`\`\`bash
-# [Command to verify readiness]
-[command here]
-\`\`\`
-
-**Expected output:** [Describe expected output]
-
-### Step 2: [ACTION NAME]
-
-\`\`\`bash
-# [Command]
-[command here]
-\`\`\`
-
-**Expected output:** [Describe expected output]
-**If this fails:** [Describe recovery action]
-
-### Step 3: Verification
-
-\`\`\`bash
-# Verify the operation completed successfully
-[verification command]
-\`\`\`
-
-## Rollback Procedure
-
-[Describe how to undo this operation if needed]
-
-## Approvals
-
-| Role | Name | Signature | Date |
-|------|------|-----------|------|
-| Author | | | |
-| Reviewer | | | |
-| Approver | | | |
-`,
-
-  architecture_doc: (title) => `# Architecture Documentation: ${title}
-
-**Version:** 1.0
-**Date:** ${new Date().toLocaleDateString()}
-**Status:** [DRAFT / APPROVED]
-
----
-
-## Overview
-
-[High-level description of the system or component]
-
-## Architecture Diagram
-
-\`\`\`
-[Draw ASCII diagram or describe the architecture here]
-Example:
-Internet → Load Balancer → [App-01, App-02] → PostgreSQL
-                       ↘ Redis (cache)
-\`\`\`
-
-## Components
-
-| Component | Technology | Purpose | Hosts |
-|-----------|------------|---------|-------|
-| Web Tier | [e.g. Nginx] | [e.g. Reverse proxy, SSL termination] | [servers] |
-| App Tier | [e.g. Node.js] | [e.g. API and business logic] | [servers] |
-| Data Tier | [e.g. PostgreSQL] | [e.g. Primary data store] | [servers] |
-| Cache | [e.g. Redis] | [e.g. Session & query cache] | [servers] |
-
-## Network & Security
-
-- **Firewall rules:** [List key inbound/outbound rules]
-- **Encryption:** [TLS version, certificate authority]
-- **Authentication:** [How services authenticate to each other]
-- **Secrets management:** [How credentials are stored]
-
-## Data Flow
-
-[Describe how data flows through the system]
-
-## Scaling Strategy
-
-[How does the system scale — horizontal/vertical, auto-scaling triggers]
-
-## Disaster Recovery
-
-- **RPO (Recovery Point Objective):** [e.g. 4 hours]
-- **RTO (Recovery Time Objective):** [e.g. 1 hour]
-- **Backup strategy:** [Describe backup schedule and retention]
-- **Failover procedure:** [Describe how to fail over]
-
-## Known Limitations
-
-[List any current limitations or technical debt]
-`,
-
-  troubleshooting_report: (title) => `# Troubleshooting Report: ${title}
-
-**Incident Date:** ${new Date().toLocaleDateString()}
-**Severity:** [Critical / High / Medium / Low]
-**Status:** [Open / Investigating / Resolved]
-**Reporter:** [YOUR NAME]
-**Assigned To:** [ENGINEER NAME]
-
----
-
-## Incident Summary
-
-**What happened:** [Brief description of the issue]
-**First observed:** [Time and date]
-**Affected systems:** [List servers/services affected]
-**Business impact:** [Describe user/business impact]
-
-## Timeline
-
-| Time | Event | Actor |
-|------|-------|-------|
-| [T+0] | [Alert triggered / Issue reported] | [System/Person] |
-| [T+X] | [Action taken] | [Engineer] |
-| [T+X] | [Resolution applied] | [Engineer] |
-| [T+X] | [Service restored] | [System] |
-
-## Root Cause Analysis
-
-**Root cause:** [Describe the root cause]
-
-**Contributing factors:**
-- [Factor 1]
-- [Factor 2]
-
-## Resolution
-
-**Steps taken:**
-\`\`\`bash
-# [Commands used to diagnose]
-[command]
-
-# [Commands used to fix]
-[command]
-\`\`\`
-
-**Result:** [Describe outcome]
-
-## Prevention
-
-- [ ] [Action 1 — e.g. Add monitoring alert for X]
-- [ ] [Action 2 — e.g. Update runbook with this procedure]
-- [ ] [Action 3 — e.g. Implement automated remediation]
-`,
-
-  srs: (title) => `# Software Requirements Specification: ${title}
-
-**Document Version:** 1.0
-**Date:** ${new Date().toLocaleDateString()}
-**Status:** [DRAFT / REVIEW / APPROVED]
-**Author:** [YOUR NAME]
-**Stakeholders:** [LIST STAKEHOLDERS]
-
----
-
-## 1. Introduction
-
-### 1.1 Purpose
-
-[Describe the purpose of this SRS and the system it covers]
-
-### 1.2 Scope
-
-[Define the boundaries of the system — what is and is not included]
-
-### 1.3 Definitions & Acronyms
-
-| Term | Definition |
-|------|-----------|
-| [TERM] | [Definition] |
-
-## 2. System Overview
-
-[High-level description of the system and its context]
-
-## 3. Functional Requirements
-
-### 3.1 [Feature/Module Name]
-
-**FR-001:** [Requirement statement]
-- **Priority:** [Must Have / Should Have / Nice to Have]
-- **Acceptance Criteria:** [How to verify this requirement is met]
-
-**FR-002:** [Requirement statement]
-- **Priority:** [Must Have / Should Have / Nice to Have]
-- **Acceptance Criteria:** [How to verify this requirement is met]
-
-### 3.2 [Another Feature/Module]
-
-**FR-003:** [Requirement statement]
-- **Priority:** [Must Have]
-- **Acceptance Criteria:** [Criteria]
-
-## 4. Non-Functional Requirements
-
-### 4.1 Performance
-- **NFR-001:** [e.g. The system shall respond to API requests within 200ms under normal load]
-
-### 4.2 Security
-- **NFR-002:** [e.g. All data at rest shall be encrypted using AES-256]
-
-### 4.3 Availability
-- **NFR-003:** [e.g. The system shall maintain 99.9% uptime]
-
-### 4.4 Scalability
-- **NFR-004:** [e.g. The system shall support N concurrent users]
-
-## 5. System Interfaces
-
-### 5.1 User Interfaces
-[Describe UI requirements]
-
-### 5.2 External Interfaces / APIs
-[List external systems the software integrates with]
-
-## 6. Constraints & Assumptions
-
-**Constraints:**
-- [Technical or business constraints]
-
-**Assumptions:**
-- [Assumptions made during requirements gathering]
-
-## 7. Acceptance Criteria Summary
-
-[Overall acceptance criteria for project completion]
-`,
+// Per-type AI prompts — Gemini fills every section using real server/deployment data
+const DOC_PROMPTS: Record<string, (title: string, ctx: string, date: string) => string> = {
+  deployment_report: (title, ctx, date) =>
+    `You are a senior DevOps engineer writing an official Deployment Report.
+
+Title: "${title}"
+Date: ${date}
+${ctx}
+
+Write a complete, professional Deployment Report in Markdown. Fill every field with realistic, specific content based on the context above. Do NOT use placeholder brackets like [YOUR NAME] or [TODO]. Make reasonable assumptions where data is missing.
+
+Include these sections:
+1. Header (title, date, server/deployment names, engineer name inferred from context, status)
+2. Executive Summary (2-3 sentences on what was deployed and outcome)
+3. Pre-Deployment Checklist (specific items checked for this server/deployment)
+4. Steps Executed (numbered table with realistic step names, statuses, durations, notes)
+5. Metrics (deployment duration, downtime, services affected)
+6. Post-Deployment Verification (specific checks for this server's OS and services)
+7. Issues Encountered (realistic "None" if context shows a healthy server)
+8. Rollback Plan (specific steps if rollback were needed)
+9. Conclusion & Next Steps
+
+Return only the Markdown document.`,
+
+  sop: (title, ctx, date) =>
+    `You are a senior systems administrator writing an official Standard Operating Procedure.
+
+Title: "${title}"
+Date: ${date}
+${ctx}
+
+Write a complete, professional SOP document in Markdown. Fill every section with specific, actionable content. Use actual commands appropriate for the server's OS (${ctx.includes("ubuntu") || ctx.includes("debian") ? "Ubuntu/Debian — use apt" : ctx.includes("rhel") || ctx.includes("centos") ? "RHEL/CentOS — use dnf/yum" : "Linux"}). Do NOT use placeholder brackets.
+
+Include these sections:
+1. Header (document ID, version, effective date, review date, owner)
+2. Purpose (specific to the title)
+3. Scope (which servers/environments this covers)
+4. Prerequisites (specific access requirements and tools)
+5. Procedure (numbered steps with real bash commands, expected outputs, failure actions)
+6. Verification Steps (specific commands to confirm success)
+7. Rollback Procedure (exact commands to undo)
+8. Troubleshooting (common failure scenarios and fixes)
+9. Approvals table
+
+Return only the Markdown document.`,
+
+  architecture_doc: (title, ctx, date) =>
+    `You are a senior solutions architect writing official Architecture Documentation.
+
+Title: "${title}"
+Date: ${date}
+${ctx}
+
+Write a complete, professional Architecture Documentation in Markdown. Fill every section with specific technical content based on the server/infrastructure context. Do NOT use placeholder brackets.
+
+Include these sections:
+1. Header (version, date, status, author)
+2. Executive Overview (what this system does)
+3. Architecture Diagram (ASCII art showing the actual server(s), connections, and components)
+4. Component Inventory (table listing each component, technology, purpose, and host)
+5. Network & Security (actual ports, firewall rules appropriate for this OS, TLS config)
+6. Data Flow (how requests flow through the system)
+7. High Availability & Scaling Strategy
+8. Disaster Recovery (RPO/RTO targets, backup strategy for this server's OS)
+9. Monitoring & Alerting (what metrics to watch, alert thresholds)
+10. Known Limitations & Technical Debt
+
+Return only the Markdown document.`,
+
+  troubleshooting_report: (title, ctx, date) =>
+    `You are a senior DevOps engineer writing a Troubleshooting Report / Incident Post-Mortem.
+
+Title: "${title}"
+Date: ${date}
+${ctx}
+
+Write a complete, professional Troubleshooting Report in Markdown. Fill every section with realistic, specific content. Use actual command examples appropriate for the server's OS. Do NOT use placeholder brackets.
+
+Include these sections:
+1. Header (incident date, severity, status, reporter, assigned to)
+2. Incident Summary (what happened, first observed, affected systems, business impact)
+3. Timeline (table with realistic T+X events, actions, actors)
+4. Diagnostic Commands Used (real bash commands with example outputs)
+5. Root Cause Analysis (specific root cause and contributing factors)
+6. Resolution Steps (exact commands executed to resolve)
+7. Prevention & Follow-up Actions (checkboxed action items)
+8. Lessons Learned
+
+Return only the Markdown document.`,
+
+  srs: (title, ctx, date) =>
+    `You are a senior software engineer writing a Software Requirements Specification (SRS).
+
+Title: "${title}"
+Date: ${date}
+${ctx}
+
+Write a complete, professional SRS document in Markdown. Fill every section with specific, realistic content. Do NOT use placeholder brackets like [YOUR NAME] or [TODO].
+
+Include these sections:
+1. Introduction (Purpose, Scope, Definitions & Acronyms, References)
+2. Overall Description (Product Perspective, Functions, User Classes, Operating Environment, Constraints)
+3. Functional Requirements (numbered FR-001 onward with priority and acceptance criteria)
+4. Non-Functional Requirements (Performance, Security, Availability, Scalability, Maintainability)
+5. System Interfaces (User, Software, Hardware, Communication)
+6. Data Requirements (data models, retention, privacy)
+7. Constraints & Assumptions
+8. Appendix
+
+Return only the Markdown document.`,
 };
 
 router.get("/organizations/:orgId/documents", async (req, res) => {
@@ -334,70 +140,74 @@ router.get("/organizations/:orgId/documents", async (req, res) => {
 
 router.post("/organizations/:orgId/documents", async (req, res) => {
   const orgId = parseInt(req.params["orgId"] ?? "0");
-  const { type, title, prompt, mode } = req.body;
+  const { type, title, prompt } = req.body;
 
   // Coerce FK fields to integer or null — never pass empty strings to integer columns
   const serverId: number | null = req.body.serverId ? parseInt(req.body.serverId) : null;
   const deploymentId: number | null = req.body.deploymentId ? parseInt(req.body.deploymentId) : null;
 
-  // Build context from related records
-  let context: any = {};
+  // Fetch related records to build rich context
+  let server: any = null;
+  let deployment: any = null;
   if (serverId) {
-    const [server] = await db.select().from(serversTable).where(eq(serversTable.id, serverId)).limit(1);
-    if (server) context.server = server;
+    const [s] = await db.select().from(serversTable).where(eq(serversTable.id, serverId)).limit(1);
+    server = s ?? null;
   }
   if (deploymentId) {
-    const [deployment] = await db.select().from(deploymentsTable).where(eq(deploymentsTable.id, deploymentId)).limit(1);
-    if (deployment) context.deployment = deployment;
+    const [d] = await db.select().from(deploymentsTable).where(eq(deploymentsTable.id, deploymentId)).limit(1);
+    deployment = d ?? null;
   }
 
-  let content: string;
+  // Build context block from actual server/deployment data
+  const ctxLines: string[] = [];
+  if (server) {
+    ctxLines.push(`Server Name: ${server.name}`);
+    if (server.clientName) ctxLines.push(`Client: ${server.clientName}`);
+    ctxLines.push(`Host / IP: ${server.host}`);
+    ctxLines.push(`OS: ${server.os}${server.osVersion ? " " + server.osVersion : ""}`);
+    ctxLines.push(`SSH Port: ${server.sshPort ?? 22}  Username: ${server.sshUsername ?? "root"}`);
+    ctxLines.push(`Status: ${server.status}`);
+    if (server.cpuUsage != null) ctxLines.push(`CPU Usage: ${server.cpuUsage}%`);
+    if (server.memUsage != null) ctxLines.push(`Memory Usage: ${server.memUsage}%`);
+    if (server.diskUsage != null) ctxLines.push(`Disk Usage: ${server.diskUsage}%`);
+    if (server.description) ctxLines.push(`Description: ${server.description}`);
+    if (server.tags?.length) ctxLines.push(`Tags: ${(server.tags as string[]).join(", ")}`);
+    if (server.lastSeen) ctxLines.push(`Last Seen: ${new Date(server.lastSeen).toLocaleString()}`);
+  }
+  if (deployment) {
+    ctxLines.push(`Related Deployment: ${(deployment as any).name ?? deployment.id}`);
+    if ((deployment as any).status) ctxLines.push(`Deployment Status: ${(deployment as any).status}`);
+    if ((deployment as any).environment) ctxLines.push(`Deployment Environment: ${(deployment as any).environment}`);
+  }
+  if (prompt) ctxLines.push(`Additional user context: ${prompt}`);
 
-  // SRS and any AI-enabled type: generate with Gemini
-  if (type === "srs") {
+  const contextBlock = ctxLines.length
+    ? `\nInfrastructure context:\n${ctxLines.map(l => `- ${l}`).join("\n")}`
+    : "\nNo specific server context provided — write for a general Linux infrastructure environment.";
+
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  // Generate content with AI for all document types
+  let content: string;
+  const promptFn = DOC_PROMPTS[type];
+  if (promptFn) {
     try {
       const ai = getGemini();
-      const contextLines: string[] = [];
-      if (context.server) contextLines.push(`Server: ${context.server.name} (${context.server.ip ?? "no IP"}, ${context.server.os ?? "unknown OS"})`);
-      if (context.deployment) contextLines.push(`Related deployment: ${(context.deployment as any).name ?? "unnamed"}`);
-      if (prompt) contextLines.push(`Additional context from user: ${prompt}`);
-
-      const systemContext = contextLines.length
-        ? `\n\nContext about the system:\n${contextLines.join("\n")}`
-        : "";
-
-      const aiPrompt = `You are a senior software engineer. Generate a complete, professional Software Requirements Specification (SRS) document for: "${title}".${systemContext}
-
-The document must be thorough and production-ready — not a template with placeholders. Fill in every section with realistic, detailed content appropriate for an infrastructure management system. Use today's date: ${new Date().toLocaleDateString()}.
-
-Structure the document with these sections:
-1. Introduction (Purpose, Scope, Definitions & Acronyms, References)
-2. Overall Description (Product Perspective, Product Functions, User Classes, Operating Environment, Constraints)
-3. Functional Requirements (numbered FR-001..., with priority and acceptance criteria for each)
-4. Non-Functional Requirements (Performance, Security, Availability, Scalability, Maintainability)
-5. System Interfaces (User Interfaces, Software Interfaces, Hardware Interfaces, Communication Interfaces)
-6. Data Requirements (Data models, Retention, Privacy)
-7. Constraints & Assumptions
-8. Appendix
-
-Return only the markdown document — no preamble or explanation.`;
-
+      const aiPrompt = promptFn(title, contextBlock, today);
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [{ text: aiPrompt }] }],
         config: { maxOutputTokens: 8192 },
       });
-      content = response.text ?? "";
+      content = response.text?.trim() ?? "";
+      if (!content) throw new Error("Empty response from Gemini");
     } catch (err: any) {
-      console.error("[documents] Gemini SRS generation failed:", err?.message ?? err);
-      // Fall back to template
-      content = DOC_TEMPLATES["srs"]?.(title, context) ?? `# ${title}`;
+      console.error(`[documents] AI generation failed for type=${type}:`, err?.message ?? err);
+      content = `# ${title}\n\n*Document generation failed. Please try again.*\n\n${contextBlock}`;
     }
   } else {
-    const generator = DOC_TEMPLATES[type];
-    content = generator
-      ? generator(title, { serverName: context.server?.name, deploymentName: (context.deployment as any)?.name })
-      : `# ${title}\n\n${prompt ?? ""}`;
+    // Unknown type — just store title + prompt
+    content = `# ${title}\n\n${prompt ?? ""}`;
   }
 
   const [doc] = await db.insert(documentsTable).values({
