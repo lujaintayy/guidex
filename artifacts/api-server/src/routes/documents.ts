@@ -3,6 +3,18 @@ import { db } from "@workspace/db";
 import { documentsTable, reportsTable, serversTable, deploymentsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { authMiddleware } from "../lib/auth";
+import { GoogleGenAI } from "@google/genai";
+
+let _gemini: GoogleGenAI | null = null;
+function getGemini(): GoogleGenAI {
+  if (!_gemini) {
+    const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
+    const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
+    if (!apiKey || !baseUrl) throw new Error("Gemini not configured");
+    _gemini = new GoogleGenAI({ apiKey, httpOptions: { baseUrl, apiVersion: "" } });
+  }
+  return _gemini;
+}
 
 const router = Router();
 router.use(authMiddleware);
@@ -322,23 +334,71 @@ router.get("/organizations/:orgId/documents", async (req, res) => {
 
 router.post("/organizations/:orgId/documents", async (req, res) => {
   const orgId = parseInt(req.params["orgId"] ?? "0");
-  const { type, title, deploymentId, serverId, prompt, mode } = req.body;
+  const { type, title, prompt, mode } = req.body;
 
-  // Build context for template generation
+  // Coerce FK fields to integer or null — never pass empty strings to integer columns
+  const serverId: number | null = req.body.serverId ? parseInt(req.body.serverId) : null;
+  const deploymentId: number | null = req.body.deploymentId ? parseInt(req.body.deploymentId) : null;
+
+  // Build context from related records
   let context: any = {};
   if (serverId) {
     const [server] = await db.select().from(serversTable).where(eq(serversTable.id, serverId)).limit(1);
-    if (server) context.serverName = server.name;
+    if (server) context.server = server;
   }
   if (deploymentId) {
     const [deployment] = await db.select().from(deploymentsTable).where(eq(deploymentsTable.id, deploymentId)).limit(1);
-    if (deployment) context.deploymentName = (deployment as any).name;
+    if (deployment) context.deployment = deployment;
   }
 
-  const generator = DOC_TEMPLATES[type];
-  const content = generator
-    ? generator(title, context)
-    : `# ${title}\n\n${prompt ?? ""}`;
+  let content: string;
+
+  // SRS and any AI-enabled type: generate with Gemini
+  if (type === "srs") {
+    try {
+      const ai = getGemini();
+      const contextLines: string[] = [];
+      if (context.server) contextLines.push(`Server: ${context.server.name} (${context.server.ip ?? "no IP"}, ${context.server.os ?? "unknown OS"})`);
+      if (context.deployment) contextLines.push(`Related deployment: ${(context.deployment as any).name ?? "unnamed"}`);
+      if (prompt) contextLines.push(`Additional context from user: ${prompt}`);
+
+      const systemContext = contextLines.length
+        ? `\n\nContext about the system:\n${contextLines.join("\n")}`
+        : "";
+
+      const aiPrompt = `You are a senior software engineer. Generate a complete, professional Software Requirements Specification (SRS) document for: "${title}".${systemContext}
+
+The document must be thorough and production-ready — not a template with placeholders. Fill in every section with realistic, detailed content appropriate for an infrastructure management system. Use today's date: ${new Date().toLocaleDateString()}.
+
+Structure the document with these sections:
+1. Introduction (Purpose, Scope, Definitions & Acronyms, References)
+2. Overall Description (Product Perspective, Product Functions, User Classes, Operating Environment, Constraints)
+3. Functional Requirements (numbered FR-001..., with priority and acceptance criteria for each)
+4. Non-Functional Requirements (Performance, Security, Availability, Scalability, Maintainability)
+5. System Interfaces (User Interfaces, Software Interfaces, Hardware Interfaces, Communication Interfaces)
+6. Data Requirements (Data models, Retention, Privacy)
+7. Constraints & Assumptions
+8. Appendix
+
+Return only the markdown document — no preamble or explanation.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: aiPrompt }] }],
+        config: { maxOutputTokens: 8192 },
+      });
+      content = response.text ?? "";
+    } catch (err: any) {
+      console.error("[documents] Gemini SRS generation failed:", err?.message ?? err);
+      // Fall back to template
+      content = DOC_TEMPLATES["srs"]?.(title, context) ?? `# ${title}`;
+    }
+  } else {
+    const generator = DOC_TEMPLATES[type];
+    content = generator
+      ? generator(title, { serverName: context.server?.name, deploymentName: (context.deployment as any)?.name })
+      : `# ${title}\n\n${prompt ?? ""}`;
+  }
 
   const [doc] = await db.insert(documentsTable).values({
     orgId,
@@ -346,8 +406,8 @@ router.post("/organizations/:orgId/documents", async (req, res) => {
     title,
     content,
     format: "markdown",
-    relatedDeploymentId: deploymentId ?? null,
-    relatedServerId: serverId ?? null,
+    relatedDeploymentId: deploymentId,
+    relatedServerId: serverId,
   }).returning();
   if (!doc) { res.status(500).json({ error: "Failed" }); return; }
   res.status(201).json(doc);
