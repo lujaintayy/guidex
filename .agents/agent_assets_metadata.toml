@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "3b1bp8L_XYSXpIn_0P8z5"
+uri = "file://GUIDEX_TECHNICAL_OVERVIEW.md"
+type = "text"
+title = "GuideX Technical Overview"
