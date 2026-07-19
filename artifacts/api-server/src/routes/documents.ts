@@ -237,6 +237,122 @@ router.delete("/organizations/:orgId/documents/:documentId", async (req, res) =>
   res.status(204).end();
 });
 
+// ── Report AI prompts ─────────────────────────────────────────────────────────
+const REPORT_PROMPTS: Record<string, (title: string, ctx: string, period: string, date: string) => string> = {
+  deployment_summary: (title, ctx, period, date) =>
+    `You are a senior DevOps engineer writing a Deployment Summary Report.
+
+Title: "${title}"
+Date: ${date}${period}
+${ctx}
+
+Write a complete, professional Deployment Summary Report in Markdown. Use the real server data above — do NOT use placeholder brackets.
+
+Include:
+1. Executive Summary (2-3 sentences on deployment health)
+2. Deployment Statistics (table: total deployments, success rate, avg duration, rollbacks — use realistic numbers based on server status)
+3. Server Status Overview (table with server name, OS, host, current status, CPU/memory/disk)
+4. Recent Deployment Activity (timeline of likely recent deployments based on server context)
+5. Key Findings & Observations
+6. Failed Deployments & Issues (none if server is healthy)
+7. Recommendations & Next Steps
+
+Return only the Markdown report.`,
+
+  server_health: (title, ctx, period, date) =>
+    `You are a senior systems administrator writing a Server Health Report.
+
+Title: "${title}"
+Date: ${date}${period}
+${ctx}
+
+Write a complete, professional Server Health Report in Markdown. Use the actual metrics from the server data above — do NOT use placeholder brackets.
+
+Include:
+1. Executive Summary (overall health assessment — healthy/warning/critical based on metrics)
+2. Server Inventory (table: name, host, OS, status, last seen)
+3. Resource Utilization (table: CPU%, Memory%, Disk% with health indicators ✅⚠️🔴 based on actual values)
+4. Health Score per Server (calculated from the metrics — e.g. CPU<70% = green, 70-85% = yellow, >85% = red)
+5. Performance Trends & Analysis
+6. Alerts & Threshold Violations (based on actual metric values)
+7. Maintenance Recommendations (specific to the OS and current resource usage)
+8. Action Items
+
+Return only the Markdown report.`,
+
+  compliance: (title, ctx, period, date) =>
+    `You are a security compliance engineer writing a Compliance Report.
+
+Title: "${title}"
+Date: ${date}${period}
+${ctx}
+
+Write a complete, professional Compliance Report in Markdown. Use the actual server data above — do NOT use placeholder brackets.
+
+Include:
+1. Executive Summary (overall compliance posture)
+2. Scope (servers and systems covered)
+3. Compliance Checklist (table with control, status ✅/⚠️/❌, and notes — appropriate for the server OS)
+4. Security Controls Assessment:
+   - Authentication & Access Control
+   - Patch Management (reference actual OS version)
+   - Network Security (SSH port, firewall)
+   - Encryption & Data Protection
+   - Logging & Monitoring
+   - Backup & Recovery
+5. Findings & Risk Register (table: finding, severity, status, remediation)
+6. Remediation Roadmap
+7. Sign-off & Next Audit Date
+
+Return only the Markdown report.`,
+
+  incident_report: (title, ctx, period, date) =>
+    `You are a senior incident manager writing an Incident Report / Post-Mortem.
+
+Title: "${title}"
+Date: ${date}${period}
+${ctx}
+
+Write a complete, professional Incident Report in Markdown. Use the actual server data above — do NOT use placeholder brackets. Make realistic assumptions where specific incident details are unavailable.
+
+Include:
+1. Incident Summary (what, when, impact, duration)
+2. Affected Systems (table with the actual servers from context)
+3. Timeline (T+0 through resolution — realistic events based on server OS and status)
+4. Diagnostic Commands Used (real bash commands for the server's OS with realistic outputs)
+5. Root Cause Analysis (5-Why methodology)
+6. Impact Assessment (users affected, data integrity, SLA breach)
+7. Resolution Steps (specific commands that resolved the issue)
+8. Prevention Measures (checkboxed action items)
+9. Lessons Learned
+
+Return only the Markdown report.`,
+
+  capacity_planning: (title, ctx, period, date) =>
+    `You are a senior infrastructure architect writing a Capacity Planning Report.
+
+Title: "${title}"
+Date: ${date}${period}
+${ctx}
+
+Write a complete, professional Capacity Planning Report in Markdown. Use the actual CPU, memory, and disk metrics from the server data above — do NOT use placeholder brackets. Calculate realistic projections.
+
+Include:
+1. Executive Summary (capacity health and urgency)
+2. Current Resource Baseline (table: server, CPU%, Memory%, Disk% with the actual values)
+3. Utilization Analysis (which resources are at risk — threshold: warning >70%, critical >85%)
+4. Growth Projections (6-month and 12-month outlook based on current usage trends)
+5. Bottleneck Identification (most constrained resources per server)
+6. Capacity Recommendations:
+   - Immediate actions (for any >85% utilization)
+   - Short-term (1-3 months)
+   - Long-term (6-12 months)
+7. Cost Estimates (estimated infrastructure cost to address capacity gaps)
+8. Implementation Roadmap
+
+Return only the Markdown report.`,
+};
+
 // Reports
 router.get("/organizations/:orgId/reports", async (req, res) => {
   const orgId = parseInt(req.params["orgId"] ?? "0");
@@ -246,34 +362,91 @@ router.get("/organizations/:orgId/reports", async (req, res) => {
 
 router.post("/organizations/:orgId/reports", async (req, res) => {
   const orgId = parseInt(req.params["orgId"] ?? "0");
-  const { type, title, dateFrom, dateTo, serverId, deploymentId } = req.body;
+  const { type, title, dateFrom, dateTo } = req.body;
 
-  // Build a rich summary based on context
-  let contextInfo = "";
+  // Coerce FK fields
+  const serverId: number | null = req.body.serverId ? parseInt(req.body.serverId) : null;
+  const deploymentId: number | null = req.body.deploymentId ? parseInt(req.body.deploymentId) : null;
+
+  // Fetch related records
+  let server: any = null;
+  let deployment: any = null;
   if (serverId) {
-    const [server] = await db.select().from(serversTable).where(eq(serversTable.id, serverId)).limit(1);
-    if (server) contextInfo = ` for server "${server.name}" (${server.host})`;
+    const [s] = await db.select().from(serversTable).where(eq(serversTable.id, serverId)).limit(1);
+    server = s ?? null;
   }
   if (deploymentId) {
-    const [deployment] = await db.select().from(deploymentsTable).where(eq(deploymentsTable.id, deploymentId)).limit(1);
-    if (deployment) contextInfo = ` for deployment "${(deployment as any).name}"`;
+    const [d] = await db.select().from(deploymentsTable).where(eq(deploymentsTable.id, deploymentId)).limit(1);
+    deployment = d ?? null;
   }
 
-  const period = dateFrom || dateTo ? ` covering ${dateFrom ?? "all time"} to ${dateTo ?? "present"}` : "";
-  const summary = `${type.replace(/_/g, " ")} report generated${contextInfo}${period}.`;
+  // Build context block from actual data
+  const ctxLines: string[] = [];
+  if (server) {
+    ctxLines.push(`Server Name: ${server.name}`);
+    if (server.clientName) ctxLines.push(`Client: ${server.clientName}`);
+    ctxLines.push(`Host / IP: ${server.host}`);
+    ctxLines.push(`OS: ${server.os}${server.osVersion ? " " + server.osVersion : ""}`);
+    ctxLines.push(`SSH Port: ${server.sshPort ?? 22}  Username: ${server.sshUsername ?? "root"}`);
+    ctxLines.push(`Status: ${server.status}`);
+    if (server.cpuUsage != null) ctxLines.push(`CPU Usage: ${server.cpuUsage}%`);
+    if (server.memUsage != null) ctxLines.push(`Memory Usage: ${server.memUsage}%`);
+    if (server.diskUsage != null) ctxLines.push(`Disk Usage: ${server.diskUsage}%`);
+    if (server.description) ctxLines.push(`Description: ${server.description}`);
+    if (server.tags?.length) ctxLines.push(`Tags: ${(server.tags as string[]).join(", ")}`);
+    if (server.lastSeen) ctxLines.push(`Last Seen: ${new Date(server.lastSeen).toLocaleString()}`);
+  }
+  if (deployment) {
+    ctxLines.push(`Related Deployment: ${(deployment as any).name ?? deployment.id}`);
+    if ((deployment as any).status) ctxLines.push(`Deployment Status: ${(deployment as any).status}`);
+  }
+  if (!ctxLines.length) {
+    ctxLines.push("No specific server context provided — write for a general Linux infrastructure environment.");
+  }
+
+  const contextBlock = `\nInfrastructure context:\n${ctxLines.map(l => `- ${l}`).join("\n")}`;
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const period = dateFrom || dateTo ? `\nPeriod: ${dateFrom ?? "all time"} to ${dateTo ?? "present"}` : "";
+
+  const promptFn = REPORT_PROMPTS[type];
+  let content = "";
+  if (promptFn) {
+    try {
+      const ai = getGemini();
+      const aiPrompt = promptFn(title, contextBlock, period, today);
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: aiPrompt }] }],
+        config: { maxOutputTokens: 8192 },
+      });
+      content = response.text?.trim() ?? "";
+    } catch (err: any) {
+      console.error(`[reports] AI generation failed for type=${type}:`, err?.message ?? err);
+      content = `# ${title}\n\n*Report generation failed. Please try again.*\n\n${contextBlock}`;
+    }
+  } else {
+    content = `# ${title}\n\nReport type: ${type}`;
+  }
+
+  // Use first 3 lines as summary
+  const summary = content.split("\n").filter(l => l.trim()).slice(0, 3).join(" ").slice(0, 300);
 
   const [report] = await db.insert(reportsTable).values({
     orgId,
     type,
     title,
     summary,
-    data: JSON.stringify({
-      generated: new Date(),
-      filters: { dateFrom, dateTo, serverId, deploymentId },
-    }),
+    data: JSON.stringify({ generated: new Date(), content, filters: { dateFrom, dateTo, serverId, deploymentId } }),
   }).returning();
   if (!report) { res.status(500).json({ error: "Failed" }); return; }
   res.status(201).json({ ...report, data: JSON.parse(report.data) });
+});
+
+router.delete("/organizations/:orgId/reports/:reportId", async (req, res) => {
+  const orgId = parseInt(req.params["orgId"] ?? "0");
+  const reportId = parseInt(req.params["reportId"] ?? "0");
+  await db.delete(reportsTable).where(and(eq(reportsTable.id, reportId), eq(reportsTable.orgId, orgId)));
+  res.status(204).end();
 });
 
 export default router;
