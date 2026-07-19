@@ -1,44 +1,79 @@
 /**
  * Email helper using Nodemailer.
- * Reads SMTP config from env vars. Gracefully skips sending when vars are absent.
+ * Reads SMTP config from env vars. Throws at startup when vars are absent,
+ * and throws on send failure so callers can surface errors to users.
  *
- * Required env vars (all optional — sending is a no-op when missing):
+ * Required env vars:
  *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
  */
 import nodemailer from "nodemailer";
 
-function getTransport() {
-  const host = process.env["SMTP_HOST"];
-  const port = parseInt(process.env["SMTP_PORT"] ?? "587", 10);
-  const user = process.env["SMTP_USER"];
-  const pass = process.env["SMTP_PASS"];
+// ── Startup validation ────────────────────────────────────────────────────────
 
-  if (!host || !user || !pass) return null;
+const SMTP_HOST = process.env["SMTP_HOST"];
+const SMTP_PORT_RAW = process.env["SMTP_PORT"] ?? "587";
+const SMTP_USER = process.env["SMTP_USER"];
+const SMTP_PASS = process.env["SMTP_PASS"];
+const SMTP_FROM =
+  process.env["SMTP_FROM"] ?? process.env["SMTP_USER"] ?? "noreply@guidex.app";
+
+const SMTP_PORT = parseInt(SMTP_PORT_RAW, 10);
+
+const smtpConfigured = !!(SMTP_HOST && SMTP_USER && SMTP_PASS);
+
+if (smtpConfigured) {
+  console.info(
+    `[email] SMTP configured — host=${SMTP_HOST} port=${SMTP_PORT} user=${SMTP_USER} from=${SMTP_FROM}`,
+  );
+} else {
+  const missing = [
+    !SMTP_HOST && "SMTP_HOST",
+    !SMTP_USER && "SMTP_USER",
+    !SMTP_PASS && "SMTP_PASS",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  console.warn(
+    `[email] SMTP NOT configured (missing: ${missing}) — email delivery will fail at runtime`,
+  );
+}
+
+// ── Transport ─────────────────────────────────────────────────────────────────
+
+function getTransport(): nodemailer.Transporter {
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+    throw new Error(
+      "SMTP is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS environment secrets.",
+    );
+  }
 
   return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
 }
 
-const FROM = process.env["SMTP_FROM"] ?? process.env["SMTP_USER"] ?? "noreply@guidex.app";
+// ── Core send ─────────────────────────────────────────────────────────────────
 
 async function send(to: string, subject: string, html: string): Promise<void> {
-  const transport = getTransport();
-  if (!transport) {
-    console.warn(`[email] SMTP not configured — skipping email to ${to}: ${subject}`);
-    return;
-  }
+  const transport = getTransport(); // throws if SMTP not configured
   try {
-    await transport.sendMail({ from: FROM, to, subject, html });
+    await transport.sendMail({ from: SMTP_FROM, to, subject, html });
+    console.info(`[email] Sent "${subject}" to ${to}`);
   } catch (err) {
-    console.error(`[email] Failed to send email to ${to}:`, err);
+    console.error(`[email] Failed to send "${subject}" to ${to}:`, err);
+    throw new Error(`Email delivery failed: ${(err as Error).message}`);
   }
 }
 
-export async function sendVerificationCode(to: string, code: string): Promise<void> {
+// ── Public helpers ────────────────────────────────────────────────────────────
+
+export async function sendVerificationCode(
+  to: string,
+  code: string,
+): Promise<void> {
   await send(
     to,
     "GuideX — Verify your email address",

@@ -56,7 +56,13 @@ router.post("/auth/register", async (req, res) => {
       .update(usersTable)
       .set({ emailVerificationCode: codeHash, emailVerificationExpiry: expiry })
       .where(eq(usersTable.id, existing[0].id));
-    await sendVerificationCode(email, code);
+    try {
+      await sendVerificationCode(email, code);
+    } catch (err) {
+      console.error("[auth] Failed to resend OTP:", err);
+      res.status(503).json({ error: "Could not send verification email — please try again shortly" });
+      return;
+    }
     res.json({ message: "Verification code resent", email: email.toLowerCase() });
     return;
   }
@@ -83,7 +89,16 @@ router.post("/auth/register", async (req, res) => {
     return;
   }
 
-  await sendVerificationCode(email, code);
+  try {
+    await sendVerificationCode(email, code);
+  } catch (err) {
+    console.error("[auth] Failed to send OTP to new user:", err);
+    // Roll back the user record so they can retry registration cleanly
+    await db.delete(usersTable).where(eq(usersTable.id, user.id));
+    res.status(503).json({ error: "Could not send verification email — please try again shortly" });
+    return;
+  }
+
   res.status(201).json({ message: "Verification code sent", email: email.toLowerCase() });
 });
 
@@ -133,10 +148,12 @@ router.post("/auth/verify-email", async (req, res) => {
     })
     .where(eq(usersTable.id, user.id));
 
-  // Notify the super-admin only when an explicit admin email is configured
+  // Notify the super-admin — non-blocking; failure does not affect the user response
   const adminEmail = process.env["BOOTSTRAP_ADMIN_EMAIL"];
   if (adminEmail) {
-    await sendAdminNewUserAlert(adminEmail, { name: user.name, email: user.email });
+    sendAdminNewUserAlert(adminEmail, { name: user.name, email: user.email }).catch((err) => {
+      console.error("[auth] Failed to send admin new-user alert:", err);
+    });
   } else {
     console.warn("[auth] BOOTSTRAP_ADMIN_EMAIL not set — skipping new-user admin notification");
   }
@@ -297,8 +314,10 @@ router.post("/auth/approve", authMiddleware, async (req, res) => {
       .onConflictDoNothing();
   }
 
-  // Notify user
-  await sendApprovalResult(user.email, true, validRole);
+  // Notify user — non-blocking; approval is already committed
+  sendApprovalResult(user.email, true, validRole).catch((err) => {
+    console.error("[auth] Failed to send approval email:", err);
+  });
 
   res.json({ message: "User approved", userId, role: validRole });
 });
@@ -329,7 +348,11 @@ router.post("/auth/decline", authMiddleware, async (req, res) => {
   }
 
   await db.update(usersTable).set({ status: "declined" }).where(eq(usersTable.id, userId));
-  await sendApprovalResult(user.email, false);
+
+  // Notify user — non-blocking; decline is already committed
+  sendApprovalResult(user.email, false).catch((err) => {
+    console.error("[auth] Failed to send decline email:", err);
+  });
 
   res.json({ message: "User declined", userId });
 });
