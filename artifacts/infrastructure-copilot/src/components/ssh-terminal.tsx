@@ -1,6 +1,9 @@
 /**
  * SSH Terminal modal — connects via WebSocket to /api/ws/ssh and renders
  * an interactive PTY session using xterm.js.
+ *
+ * Fix: onData registration moved into openTerminal() so it runs after
+ * React has re-rendered (container is visible, xterm can measure dimensions).
  */
 import { useEffect, useRef, useState } from "react";
 import { X, Terminal, Wifi, WifiOff, Loader2, AlertTriangle, Key, Lock } from "lucide-react";
@@ -32,21 +35,23 @@ export function SshTerminal({ server, orgId, token, onClose }: SshTerminalProps)
   const [connState, setConnState] = useState<ConnState>("idle");
   const [error, setError]         = useState<string | null>(null);
   const [password, setPassword]   = useState("");
-  const [askPw, setAskPw]         = useState(false);
 
   const needsPassword = !server.sshAuthMethod || server.sshAuthMethod === "password";
 
-  // Determine WebSocket base URL  ──────────────────────────────────────────────
   function getWsBase() {
     const loc = window.location;
     const proto = loc.protocol === "https:" ? "wss:" : "ws:";
     return `${proto}//${loc.host}`;
   }
 
-  // Open terminal ──────────────────────────────────────────────────────────────
-  function openTerminal() {
+  // Open xterm AFTER React has re-rendered with connState="connected"
+  // so the container div is display:block and has real dimensions.
+  function openTerminal(ws: WebSocket) {
     if (!termRef.current) return;
-    if (xtermRef.current) { xtermRef.current.dispose(); }
+    if (xtermRef.current) {
+      xtermRef.current.dispose();
+      xtermRef.current = null;
+    }
 
     const term = new XTerm({
       theme: {
@@ -67,13 +72,58 @@ export function SshTerminal({ server, orgId, token, onClose }: SshTerminalProps)
     xtermRef.current = term;
     fitRef.current   = fit;
 
-    // Resize observer
-    const ro = new ResizeObserver(() => fit.fit());
+    // Wire up keystroke → WebSocket HERE, with the ws reference in scope.
+    // This avoids the setTimeout race condition: by this point the socket
+    // is already in the "connected" state.
+    term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    });
+
+    // Resize observer to keep terminal sized to container
+    const ro = new ResizeObserver(() => {
+      fit.fit();
+      const { cols, rows } = term;
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "resize", cols, rows }));
+      }
+    });
     ro.observe(termRef.current);
-    return () => ro.disconnect();
+    // Store cleanup ref on the element so we can disconnect when terminal is disposed
+    (termRef.current as any)._roDisconnect = () => ro.disconnect();
   }
 
-  // Connect over WebSocket ─────────────────────────────────────────────────────
+  // Effect: when connState becomes "connected", open the terminal.
+  // At this point React has re-rendered and the container is display:block.
+  useEffect(() => {
+    if (connState !== "connected") return;
+    const ws = wsRef.current;
+    if (!ws) return;
+    // Small rAF to let the browser paint the container before xterm measures it
+    const rafId = requestAnimationFrame(() => {
+      openTerminal(ws);
+    });
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connState]);
+
+  // Global window resize → refit
+  useEffect(() => {
+    const handler = () => { fitRef.current?.fit(); };
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close();
+      if (termRef.current) {
+        (termRef.current as any)._roDisconnect?.();
+      }
+      xtermRef.current?.dispose();
+    };
+  }, []);
+
   function connect(pw?: string) {
     setConnState("connecting");
     setError(null);
@@ -88,15 +138,14 @@ export function SshTerminal({ server, orgId, token, onClose }: SshTerminalProps)
     const ws  = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => { /* wait for "connected" message */ };
+    ws.onopen = () => { /* wait for "connected" JSON message */ };
 
     ws.onmessage = (evt) => {
       const data = evt.data as string;
       try {
         const msg = JSON.parse(data) as { type: string; message?: string };
         if (msg.type === "connected") {
-          setConnState("connected");
-          openTerminal();
+          setConnState("connected"); // triggers the useEffect above
           return;
         }
         if (msg.type === "disconnected") {
@@ -111,7 +160,7 @@ export function SshTerminal({ server, orgId, token, onClose }: SshTerminalProps)
           return;
         }
       } catch {
-        // Raw terminal output
+        // Raw terminal output — not JSON
       }
       xtermRef.current?.write(data);
     };
@@ -121,42 +170,16 @@ export function SshTerminal({ server, orgId, token, onClose }: SshTerminalProps)
       setError("WebSocket connection failed — check the server is reachable");
     };
     ws.onclose = (e) => {
-      if (connState !== "connected") return;
-      setConnState("disconnected");
-      if (e.code !== 1000) {
-        xtermRef.current?.writeln("\r\n\x1b[31m[Disconnected]\x1b[0m");
+      if (connState === "connected") {
+        setConnState("disconnected");
+        if (e.code !== 1000) {
+          xtermRef.current?.writeln("\r\n\x1b[31m[Disconnected]\x1b[0m");
+        }
       }
     };
-
-    // Terminal → WebSocket
-    setTimeout(() => {
-      xtermRef.current?.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(data);
-      });
-    }, 500);
   }
 
-  // Handle resize ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const handler = () => {
-      fitRef.current?.fit();
-      const { cols, rows } = xtermRef.current ?? { cols: 80, rows: 24 };
-      wsRef.current?.send(JSON.stringify({ type: "resize", cols, rows }));
-    };
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
-  }, []);
-
-  // Cleanup ────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    return () => {
-      wsRef.current?.close();
-      xtermRef.current?.dispose();
-    };
-  }, []);
-
   const handleConnect = () => {
-    if (needsPassword && !password) { setAskPw(true); return; }
     connect(needsPassword ? password : undefined);
   };
 
@@ -199,8 +222,12 @@ export function SshTerminal({ server, orgId, token, onClose }: SshTerminalProps)
 
         {/* Body */}
         <div className="flex-1 relative overflow-hidden">
-          {/* Terminal viewport */}
-          <div ref={termRef} className="absolute inset-0 p-1" style={{ display: connState === "connected" ? "block" : "none" }} />
+          {/* Terminal viewport — always in DOM so termRef is always set */}
+          <div
+            ref={termRef}
+            className="absolute inset-0 p-1"
+            style={{ display: connState === "connected" ? "block" : "none" }}
+          />
 
           {/* Pre-connect screen */}
           {connState !== "connected" && (
@@ -217,7 +244,6 @@ export function SshTerminal({ server, orgId, token, onClose }: SshTerminalProps)
                     </div>
                   </div>
 
-                  {/* Password field (if needed + not pre-stored) */}
                   {needsPassword && (
                     <div className="w-full max-w-sm space-y-2">
                       <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">

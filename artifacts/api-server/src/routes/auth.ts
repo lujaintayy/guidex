@@ -43,12 +43,10 @@ router.post("/auth/register", async (req, res) => {
     .limit(1);
 
   if (existing[0]) {
-    // If already pending_verification, re-send OTP
     if (existing[0].status !== "pending_verification") {
       res.status(409).json({ error: "An account with this email already exists" });
       return;
     }
-    // Re-send a fresh OTP
     const code = generateOtp();
     const codeHash = hashOtp(code);
     const expiry = new Date(Date.now() + 15 * 60 * 1000);
@@ -93,7 +91,6 @@ router.post("/auth/register", async (req, res) => {
     await sendVerificationCode(email, code);
   } catch (err) {
     console.error("[auth] Failed to send OTP to new user:", err);
-    // Roll back the user record so they can retry registration cleanly
     await db.delete(usersTable).where(eq(usersTable.id, user.id));
     res.status(503).json({ error: "Could not send verification email — please try again shortly" });
     return;
@@ -138,7 +135,6 @@ router.post("/auth/verify-email", async (req, res) => {
     return;
   }
 
-  // Mark as pending_approval, clear OTP fields
   await db
     .update(usersTable)
     .set({
@@ -148,14 +144,11 @@ router.post("/auth/verify-email", async (req, res) => {
     })
     .where(eq(usersTable.id, user.id));
 
-  // Notify the super-admin — non-blocking; failure does not affect the user response
   const adminEmail = process.env["BOOTSTRAP_ADMIN_EMAIL"];
   if (adminEmail) {
     sendAdminNewUserAlert(adminEmail, { name: user.name, email: user.email }).catch((err) => {
       console.error("[auth] Failed to send admin new-user alert:", err);
     });
-  } else {
-    console.warn("[auth] BOOTSTRAP_ADMIN_EMAIL not set — skipping new-user admin notification");
   }
 
   res.json({ status: "pending_approval", message: "Email verified. Awaiting admin approval." });
@@ -299,13 +292,11 @@ router.post("/auth/approve", authMiddleware, async (req, res) => {
     return;
   }
 
-  // Update user status and role
   await db
     .update(usersTable)
     .set({ status: "active", role: validRole })
     .where(eq(usersTable.id, userId));
 
-  // Add to the primary org (orgId 1)
   const [org] = await db.select({ id: organizationsTable.id }).from(organizationsTable).limit(1);
   if (org) {
     await db
@@ -314,7 +305,6 @@ router.post("/auth/approve", authMiddleware, async (req, res) => {
       .onConflictDoNothing();
   }
 
-  // Notify user — non-blocking; approval is already committed
   sendApprovalResult(user.email, true, validRole).catch((err) => {
     console.error("[auth] Failed to send approval email:", err);
   });
@@ -349,12 +339,90 @@ router.post("/auth/decline", authMiddleware, async (req, res) => {
 
   await db.update(usersTable).set({ status: "declined" }).where(eq(usersTable.id, userId));
 
-  // Notify user — non-blocking; decline is already committed
   sendApprovalResult(user.email, false).catch((err) => {
     console.error("[auth] Failed to send decline email:", err);
   });
 
   res.json({ message: "User declined", userId });
+});
+
+// ── POST /auth/admin/create-user (admin only) ─────────────────────────────────
+// Creates a user account directly — bypasses registration/verification flow
+router.post("/auth/admin/create-user", authMiddleware, async (req, res) => {
+  const me = getUser(req);
+  if (me.role !== "admin") {
+    res.status(403).json({ error: "Admin access required" });
+    return;
+  }
+
+  const { name, email, password, role } = req.body as {
+    name?: string; email?: string; password?: string; role?: string;
+  };
+
+  if (!name || name.trim().length < 2) {
+    res.status(400).json({ error: "Name must be at least 2 characters" });
+    return;
+  }
+  if (!email || !email.includes("@")) {
+    res.status(400).json({ error: "Valid email is required" });
+    return;
+  }
+  if (!password || password.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
+    return;
+  }
+  if (!["engineer", "reviewer", "admin"].includes(role ?? "")) {
+    res.status(400).json({ error: "Valid role (engineer/reviewer/admin) is required" });
+    return;
+  }
+
+  const existing = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.email, email.toLowerCase()))
+    .limit(1);
+
+  if (existing[0]) {
+    res.status(409).json({ error: "An account with this email already exists" });
+    return;
+  }
+
+  const validRole = role as "engineer" | "reviewer" | "admin";
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  const [user] = await db
+    .insert(usersTable)
+    .values({
+      name: name.trim(),
+      email: email.toLowerCase(),
+      passwordHash,
+      status: "active",
+      role: validRole,
+    })
+    .returning();
+
+  if (!user) {
+    res.status(500).json({ error: "Failed to create account" });
+    return;
+  }
+
+  // Add to the primary org
+  const [org] = await db.select({ id: organizationsTable.id }).from(organizationsTable).limit(1);
+  if (org) {
+    await db
+      .insert(orgMembersTable)
+      .values({ orgId: org.id, userId: user.id, role: validRole })
+      .onConflictDoNothing();
+  }
+
+  res.status(201).json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    createdAt: user.createdAt,
+  });
 });
 
 export default router;

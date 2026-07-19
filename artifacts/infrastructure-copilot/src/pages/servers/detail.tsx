@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useRoute, Link } from "wouter";
 import {
   ChevronRight, Server, Cpu, HardDrive, MemoryStick, Activity, ArrowLeft,
-  Wifi, Scan, Terminal, Package, Lock, Network, CheckCircle2, XCircle,
-  Clock, RefreshCw, Loader2, AlertTriangle,
+  Scan, Terminal, Package, Lock, Network, CheckCircle2, XCircle,
+  Clock, Loader2, AlertTriangle, Info,
 } from "lucide-react";
 import {
-  useGetServer, useGetServerHealth, useListDeployments,
-  getGetServerQueryKey, getGetServerHealthQueryKey,
+  useGetServer, useListDeployments,
+  getGetServerQueryKey,
 } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -16,13 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SshTerminal } from "@/components/ssh-terminal";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-const MOCK_METRICS = Array.from({ length: 12 }, (_, i) => ({
-  time: `${i * 5}m`,
-  cpu: 15 + Math.random() * 40,
-  mem: 50 + Math.random() * 20,
-}));
 
 function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -41,9 +34,6 @@ export default function ServerDetailPage() {
   const { data: server, isLoading, refetch } = useGetServer(orgId, serverId, {
     query: { queryKey: getGetServerQueryKey(orgId, serverId) },
   });
-  const { data: health } = useGetServerHealth(orgId, serverId, {
-    query: { queryKey: getGetServerHealthQueryKey(orgId, serverId) },
-  });
   const { data: deploys } = useListDeployments(orgId, {}, {
     query: { queryKey: ["deploys-by-server", orgId, serverId] as any },
   });
@@ -53,9 +43,7 @@ export default function ServerDetailPage() {
   const [scanError, setScanError] = useState<string | null>(null);
 
   const s = server as any;
-  const h = health as any;
 
-  // ── Scan handler ─────────────────────────────────────────────────────────────
   const runScan = async () => {
     setScanning(true);
     setScanError(null);
@@ -80,10 +68,12 @@ export default function ServerDetailPage() {
   }
 
   const scanData = (s?.scanData ?? null) as Record<string, any> | null;
+  const hasCpuData = s?.cpuUsage != null;
+  const hasMemData = s?.memUsage != null;
+  const hasDiskData = s?.diskUsage != null;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* SSH Terminal modal */}
       {showTerminal && s && (
         <SshTerminal
           server={{ id: s.id, name: s.name, host: s.host, sshPort: s.sshPort, sshUsername: s.sshUsername, sshAuthMethod: s.sshAuthMethod }}
@@ -117,18 +107,12 @@ export default function ServerDetailPage() {
             </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="font-mono text-sm text-muted-foreground">{s?.sshUsername}@{s?.host}:{s?.sshPort}</span>
-              <StatusBadge status={s?.status ?? "unknown"} />
+              <StatusBadge status={s?.status ?? "offline"} />
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={runScan}
-            disabled={scanning}
-            data-testid="btn-scan-server"
-          >
+          <Button variant="outline" size="sm" onClick={runScan} disabled={scanning} data-testid="btn-scan-server">
             {scanning
               ? <><Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />Scanning…</>
               : <><Scan className="w-3.5 h-3.5 mr-2" />Scan</>}
@@ -149,14 +133,13 @@ export default function ServerDetailPage() {
 
       {scanError && (
         <div className="flex items-center gap-2 rounded-lg border border-red-800 bg-red-950/50 px-4 py-3 text-sm text-red-300">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          {scanError}
+          <AlertTriangle className="w-4 h-4 shrink-0" />{scanError}
         </div>
       )}
 
       {/* Basic info */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <InfoCard label="Operating System" value={`${s?.os ?? "—"} ${s?.osVersion ?? ""}`.trim()} />
+        <InfoCard label="Host" value={<span className="font-mono">{s?.host}</span>} />
         <InfoCard label="SSH User" value={s?.sshUsername} />
         <InfoCard label="Auth Method" value={
           <span className="flex items-center gap-1">
@@ -167,50 +150,65 @@ export default function ServerDetailPage() {
         <InfoCard label="Last Seen" value={s?.lastSeen ? new Date(s.lastSeen).toLocaleString() : "Never"} />
       </div>
 
-      {/* Scan results — shown after a successful scan */}
-      {scanData ? (
+      {/* Resource metrics — only shown when real data exists */}
+      {(hasCpuData || hasMemData || hasDiskData) ? (
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: "CPU Usage",    value: s?.cpuUsage,   icon: Cpu },
+            { label: "Memory Usage", value: s?.memUsage,   icon: MemoryStick },
+            { label: "Disk Usage",   value: s?.diskUsage,  icon: HardDrive },
+          ].map(({ label, value, icon: Icon }) => (
+            <div key={label} className="rounded-xl border border-border bg-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm text-muted-foreground">{label}</p>
+                <Icon className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <p className="text-3xl font-bold tabular-nums text-foreground mb-2">
+                {value != null ? `${Math.round(value as number)}%` : "—"}
+              </p>
+              {value != null && <MetricBar value={value as number} label="" className="w-full" />}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border bg-muted/10 p-6 flex items-center gap-4">
+          <Info className="w-5 h-5 text-muted-foreground shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">No resource metrics yet</p>
+            <p className="text-xs text-muted-foreground/60 mt-0.5">
+              Connect via SSH and run system commands to collect CPU, memory, and disk metrics.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Scan results — only shown after a real scan */}
+      {scanData && scanData["scannedAt"] ? (
         <div className="rounded-xl border border-border bg-card p-5 space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-foreground flex items-center gap-2">
-              <Scan className="w-4 h-4 text-primary" />
-              System Information
+              <Scan className="w-4 h-4 text-primary" />System Information
             </h2>
             <span className="text-xs text-muted-foreground">
-              Scanned {scanData["scannedAt"] ? new Date(scanData["scannedAt"] as string).toLocaleString() : "recently"}
+              Scanned {new Date(scanData["scannedAt"] as string).toLocaleString()}
             </span>
           </div>
 
-          {/* Hardware specs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <InfoCard label="Kernel" value={scanData["kernel"] as string} />
-            <InfoCard label="CPU Model" value={scanData["cpuModel"] as string} />
-            <InfoCard label="CPU Cores" value={scanData["cpuCores"] ? `${scanData["cpuCores"]} cores` : undefined} />
-            <InfoCard label="RAM" value={scanData["totalMemoryMb"] ? `${Math.round((scanData["totalMemoryMb"] as number) / 1024)} GB` : undefined} />
-            <InfoCard label="Disk" value={scanData["totalDiskGb"] ? `${scanData["totalDiskGb"]} GB` : undefined} />
-            <InfoCard label="Docker" value={
+            {scanData["kernel"] && <InfoCard label="Kernel" value={scanData["kernel"] as string} />}
+            {scanData["cpuModel"] && <InfoCard label="CPU Model" value={scanData["cpuModel"] as string} />}
+            {scanData["cpuCores"] && <InfoCard label="CPU Cores" value={`${scanData["cpuCores"]} cores`} />}
+            {scanData["totalMemoryMb"] && <InfoCard label="RAM" value={`${Math.round((scanData["totalMemoryMb"] as number) / 1024)} GB`} />}
+            {scanData["totalDiskGb"] && <InfoCard label="Disk" value={`${scanData["totalDiskGb"]} GB`} />}
+            {scanData["dockerInstalled"] != null && <InfoCard label="Docker" value={
               <span className="flex items-center gap-1">
                 {scanData["dockerInstalled"]
                   ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />Installed</>
                   : <><XCircle className="w-3.5 h-3.5 text-muted-foreground" />Not installed</>}
               </span>
-            } />
-            <InfoCard label="Kubernetes" value={
-              <span className="flex items-center gap-1">
-                {scanData["kubernetesInstalled"]
-                  ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />Installed</>
-                  : <><XCircle className="w-3.5 h-3.5 text-muted-foreground" />Not installed</>}
-              </span>
-            } />
-            <InfoCard label="Firewall" value={
-              <span className="flex items-center gap-1">
-                {scanData["firewallEnabled"]
-                  ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />Enabled</>
-                  : <><XCircle className="w-3.5 h-3.5 text-amber-400" />Disabled</>}
-              </span>
-            } />
+            } />}
           </div>
 
-          {/* Open ports */}
           {Array.isArray(scanData["ports"]) && (scanData["ports"] as number[]).length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-foreground mb-2 flex items-center gap-1.5">
@@ -224,7 +222,6 @@ export default function ServerDetailPage() {
             </div>
           )}
 
-          {/* Installed packages */}
           {Array.isArray(scanData["packages"]) && (scanData["packages"] as any[]).length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-foreground mb-2 flex items-center gap-1.5">
@@ -241,7 +238,6 @@ export default function ServerDetailPage() {
             </div>
           )}
 
-          {/* Services */}
           {Array.isArray(scanData["services"]) && (scanData["services"] as any[]).length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-foreground mb-2 flex items-center gap-1.5">
@@ -263,7 +259,7 @@ export default function ServerDetailPage() {
           <Scan className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
           <p className="font-medium text-muted-foreground text-sm">No scan data yet</p>
           <p className="text-xs text-muted-foreground/60 mt-1 mb-4">
-            Click <strong>Scan</strong> to collect OS, CPU, RAM, disk, packages and services info from this server.
+            Connect via SSH and run a system scan to collect hardware and software information.
           </p>
           <Button size="sm" variant="outline" onClick={runScan} disabled={scanning}>
             {scanning ? <><Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />Scanning…</> : <><Scan className="w-3.5 h-3.5 mr-2" />Run Scan</>}
@@ -271,84 +267,10 @@ export default function ServerDetailPage() {
         </div>
       )}
 
-      {/* Live health metrics */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: "CPU Usage",    value: h?.cpuUsage    ?? s?.cpuUsage,    icon: Cpu },
-          { label: "Memory Usage", value: h?.memoryUsage ?? s?.memUsage,    icon: MemoryStick },
-          { label: "Disk Usage",   value: h?.diskUsage   ?? s?.diskUsage,   icon: HardDrive },
-        ].map(({ label, value, icon: Icon }) => (
-          <div key={label} className="rounded-xl border border-border bg-card p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm text-muted-foreground">{label}</p>
-              <Icon className="w-4 h-4 text-muted-foreground" />
-            </div>
-            <p className="text-3xl font-bold tabular-nums text-foreground mb-2">
-              {value != null ? `${Math.round(value as number)}%` : "—"}
-            </p>
-            <MetricBar value={value as number} label="" className="w-full" />
-          </div>
-        ))}
-      </div>
-
-      {/* Additional health info from API */}
-      {h && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <InfoCard label="Uptime" value={h.uptime ? `${Math.floor(h.uptime / 86400)}d ${Math.floor((h.uptime % 86400) / 3600)}h` : undefined} />
-          <InfoCard label="Load Average" value={h.loadAverage ? (h.loadAverage as number[]).join(" / ") : undefined} />
-          <InfoCard label="Processes" value={h.runningProcesses} />
-          <InfoCard label="Network In/Out" value={h.networkIn != null ? `↓${h.networkIn} ↑${h.networkOut} MB/s` : undefined} />
-        </div>
-      )}
-
-      {/* Resource history chart */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h2 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Activity className="w-4 h-4 text-muted-foreground" />
-          Resource History (1h)
-        </h2>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={MOCK_METRICS}>
-            <defs>
-              <linearGradient id="cpuGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="memGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-            <XAxis dataKey="time" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} axisLine={false} tickLine={false} unit="%" width={35} />
-            <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
-            <Area type="monotone" dataKey="cpu" name="CPU" stroke="hsl(var(--chart-1))" fill="url(#cpuGrad)" strokeWidth={2} dot={false} />
-            <Area type="monotone" dataKey="mem" name="Memory" stroke="hsl(var(--chart-2))" fill="url(#memGrad)" strokeWidth={2} dot={false} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Running services from health */}
-      {h?.runningServices && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <h2 className="font-semibold text-foreground mb-3">Running Services</h2>
-          <div className="flex flex-wrap gap-2">
-            {(h.runningServices as string[]).map(svc => (
-              <div key={svc} className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-400/10 text-emerald-400 text-xs border border-emerald-400/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                {svc}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Deployment history */}
       <div className="rounded-xl border border-border bg-card p-5">
         <h2 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Clock className="w-4 h-4 text-muted-foreground" />
-          Deployment History
+          <Clock className="w-4 h-4 text-muted-foreground" />Deployment History
         </h2>
         {!deploys || (deploys as any[]).filter((d: any) => d.serverId === serverId).length === 0 ? (
           <p className="text-muted-foreground text-sm py-6 text-center">No deployments for this server yet</p>

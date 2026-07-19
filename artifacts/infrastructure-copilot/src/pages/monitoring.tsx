@@ -3,10 +3,9 @@ import { Activity, AlertTriangle, CheckCircle2, RefreshCw, Server } from "lucide
 import { useGetMonitoringOverview, useListAlerts, getGetMonitoringOverviewQueryKey, getListAlertsQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { MetricBar, MetricGroup } from "@/components/ui/metric-bar";
+import { MetricGroup } from "@/components/ui/metric-bar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MOCK_ALERTS, MOCK_SERVERS } from "@/lib/mock-data";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -31,8 +30,9 @@ export default function MonitoringPage() {
   const { data: overview, isLoading } = useGetMonitoringOverview(orgId, { query: { queryKey: getGetMonitoringOverviewQueryKey(orgId) } });
   const { data: alerts } = useListAlerts(orgId, {}, { query: { queryKey: getListAlertsQueryKey(orgId, {}) } });
 
-  const allAlerts = (alerts && alerts.length > 0 ? alerts : MOCK_ALERTS) as any[];
-  const servers = (overview as any)?.servers ?? MOCK_SERVERS;
+  // Only use real data — no mock fallbacks
+  const allAlerts = (alerts ?? []) as any[];
+  const servers = ((overview as any)?.servers ?? []) as any[];
   const filteredAlerts = allAlerts.filter((a: any) => !severityFilter || a.severity === severityFilter);
   const activeAlerts = allAlerts.filter((a: any) => !a.resolved);
   const criticalCount = activeAlerts.filter((a: any) => a.severity === "critical").length;
@@ -81,11 +81,11 @@ export default function MonitoringPage() {
         </div>
       </div>
 
-      {/* Cluster metrics chart */}
+      {/* Cluster metrics chart — illustrative trend */}
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-foreground">Cluster Resource Usage</h2>
-          <span className="text-xs text-muted-foreground">Last 24 hours</span>
+          <h2 className="font-semibold text-foreground">Resource Trend</h2>
+          <span className="text-xs text-muted-foreground">Illustrative 24h view — connect servers for live data</span>
         </div>
         <ResponsiveContainer width="100%" height={180}>
           <AreaChart data={METRICS_HISTORY}>
@@ -109,16 +109,26 @@ export default function MonitoringPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* Server health grid */}
+      {/* Server health grid — only real servers */}
       <div>
         <h2 className="font-semibold text-foreground mb-3">Server Health</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {isLoading ? Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-32 rounded-xl" />) :
-            servers.map((server: any) => (
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
+          </div>
+        ) : servers.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center">
+            <Server className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+            <p className="text-sm font-medium text-muted-foreground">No servers registered yet</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Add servers from the Servers tab to see their health here.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {servers.map((server: any) => (
               <div key={server.id ?? server.serverId} className="rounded-xl border border-border bg-card p-4" data-testid={`card-server-health-${server.id ?? server.serverId}`}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${server.status === "online" ? "bg-emerald-400" : server.status === "offline" ? "bg-red-400" : "bg-amber-400"}`} />
+                    <div className={`w-2 h-2 rounded-full ${server.status === "online" ? "bg-emerald-400" : "bg-red-400"}`} />
                     <p className="text-sm font-medium text-foreground">{server.name}</p>
                   </div>
                   {(server.alertCount ?? 0) > 0 && (
@@ -130,12 +140,13 @@ export default function MonitoringPage() {
                   <MetricGroup cpu={server.cpuUsage} mem={server.memUsage} disk={server.diskUsage} />
                 ) : (
                   <div className="flex items-center gap-2 text-xs text-red-400">
-                    <AlertTriangle className="w-3.5 h-3.5" />Unreachable
+                    <AlertTriangle className="w-3.5 h-3.5" />Offline
                   </div>
                 )}
               </div>
             ))}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Alerts */}
@@ -156,7 +167,8 @@ export default function MonitoringPage() {
           {filteredAlerts.length === 0 ? (
             <div className="text-center py-10 text-muted-foreground rounded-xl border border-border bg-card">
               <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-400" />
-              <p>No active alerts</p>
+              <p className="font-medium">No active alerts</p>
+              <p className="text-sm text-muted-foreground/60 mt-1">Alerts from monitoring rules will appear here</p>
             </div>
           ) : filteredAlerts.map((a: any) => (
             <div key={a.id} className={`flex items-start gap-4 p-4 rounded-xl border bg-card ${a.severity === "critical" ? "border-red-500/30" : a.severity === "warning" ? "border-amber-500/30" : "border-border"}`} data-testid={`alert-${a.id}`}>

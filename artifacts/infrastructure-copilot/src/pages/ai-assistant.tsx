@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Bot, Send, Plus, Trash2, Loader2, Terminal, Copy } from "lucide-react";
+import { Bot, Send, Plus, Trash2, Loader2, Terminal, Copy, ChevronDown } from "lucide-react";
 import {
   useAiChat, useListAiConversations, useDeleteAiConversation,
   useGetAiConversation, getListAiConversationsQueryKey, getGetAiConversationQueryKey,
@@ -16,6 +16,16 @@ interface Message {
   id: number;
 }
 
+// ── Agent personas (mirrors the backend) ──────────────────────────────────────
+const AGENTS = [
+  { id: "copilot",      label: "Infrastructure Copilot",  emoji: "🚀", description: "General DevOps & sysadmin" },
+  { id: "security",     label: "Security Analyst",         emoji: "🔒", description: "Hardening & CVE analysis" },
+  { id: "deployment",   label: "Deployment Specialist",    emoji: "⚙️", description: "CI/CD & release engineering" },
+  { id: "troubleshooter", label: "Troubleshooter",         emoji: "🔍", description: "Root-cause diagnostics" },
+  { id: "database",     label: "Database Administrator",   emoji: "🗄️", description: "SQL & NoSQL administration" },
+];
+
+// ── Markdown-aware message renderer ──────────────────────────────────────────
 function parseCodeBlocks(content: string): Array<{ type: "text" | "code"; content: string; lang?: string }> {
   const parts: Array<{ type: "text" | "code"; content: string; lang?: string }> = [];
   const regex = /```(\w*)\n?([\s\S]*?)```/g;
@@ -58,6 +68,8 @@ function MessageContent({ content, role }: { content: string; role: "user" | "as
           <div key={i} className="text-sm text-foreground">
             {part.content.split("\n").map((line, j) => {
               if (line.startsWith("**") && line.endsWith("**")) return <p key={j} className="font-semibold mt-2 first:mt-0">{line.slice(2, -2)}</p>;
+              if (line.startsWith("## ")) return <p key={j} className="font-semibold text-foreground mt-3 first:mt-0">{line.slice(3)}</p>;
+              if (line.startsWith("### ")) return <p key={j} className="font-medium text-foreground mt-2 first:mt-0">{line.slice(4)}</p>;
               if (line.startsWith("- ") || line.startsWith("* ")) return <p key={j} className="flex gap-2 ml-2"><span className="text-primary mt-1 shrink-0">•</span><span>{line.slice(2)}</span></p>;
               if (/^\d+\./.test(line)) return <p key={j} className="ml-2">{line}</p>;
               if (line.trim() === "") return <br key={j} />;
@@ -71,11 +83,47 @@ function MessageContent({ content, role }: { content: string; role: "user" | "as
 }
 
 const STARTER_PROMPTS = [
-  "How do I install Nginx with SSL on Ubuntu 24.04?",
-  "What's the best practice for securing a PostgreSQL installation?",
+  "How do I harden an Ubuntu 24.04 server for production?",
+  "What's the best practice for zero-downtime Nginx deployments?",
   "Help me troubleshoot high CPU usage on my web server",
-  "Create a deployment plan for installing Docker CE",
+  "Create a deployment plan for installing Docker CE with Compose",
 ];
+
+// ── Agent selector dropdown ───────────────────────────────────────────────────
+function AgentSelector({ selected, onSelect }: { selected: string; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const agent = AGENTS.find(a => a.id === selected) ?? AGENTS[0]!;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-muted text-sm transition-colors"
+      >
+        <span>{agent.emoji}</span>
+        <span className="font-medium text-foreground">{agent.label}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+      </button>
+      {open && (
+        <div className="absolute bottom-full mb-1 left-0 w-64 rounded-xl border border-border bg-card shadow-xl z-10 overflow-hidden">
+          {AGENTS.map(a => (
+            <button
+              key={a.id}
+              onClick={() => { onSelect(a.id); setOpen(false); }}
+              className={`w-full flex items-start gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left ${selected === a.id ? "bg-accent" : ""}`}
+            >
+              <span className="text-base mt-0.5">{a.emoji}</span>
+              <div>
+                <p className="text-sm font-medium text-foreground">{a.label}</p>
+                <p className="text-xs text-muted-foreground">{a.description}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AiAssistantPage() {
   const { orgId } = useAuth();
@@ -85,6 +133,7 @@ export default function AiAssistantPage() {
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState("copilot");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const nextId = useRef(1);
 
@@ -92,7 +141,6 @@ export default function AiAssistantPage() {
   const chat = useAiChat({ mutation: {} });
   const deleteConv = useDeleteAiConversation({ mutation: { onSuccess: () => qc.invalidateQueries({ queryKey: getListAiConversationsQueryKey(orgId) }) } });
 
-  // Load conversation messages when selecting from sidebar
   const { data: convDetail } = useGetAiConversation(orgId, activeConvId ?? 0, {
     query: {
       queryKey: getGetAiConversationQueryKey(orgId, activeConvId ?? 0),
@@ -124,7 +172,10 @@ export default function AiAssistantPage() {
     const userMsg: Message = { role: "user", content: msg, id: nextId.current++ };
     setMessages(prev => [...prev, userMsg]);
     try {
-      const res = await chat.mutateAsync({ orgId, data: { message: msg, conversationId } } as any);
+      const res = await chat.mutateAsync({
+        orgId,
+        data: { message: msg, conversationId, agentId: selectedAgent },
+      } as any);
       const aiRes = res as any;
       if (aiRes.conversationId && !conversationId) {
         setConversationId(aiRes.conversationId);
@@ -132,7 +183,7 @@ export default function AiAssistantPage() {
       }
       setMessages(prev => [...prev, { role: "assistant", content: aiRes.message, id: nextId.current++ }]);
     } catch {
-      setMessages(prev => [...prev, { role: "assistant", content: "I encountered an issue processing your request. Please try again.", id: nextId.current++ }]);
+      setMessages(prev => [...prev, { role: "assistant", content: "⚠️ Failed to reach the AI service. Please try again.", id: nextId.current++ }]);
     }
   };
 
@@ -149,6 +200,8 @@ export default function AiAssistantPage() {
     setLoadingConv(true);
     setActiveConvId(id);
   };
+
+  const agent = AGENTS.find(a => a.id === selectedAgent) ?? AGENTS[0]!;
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -193,11 +246,11 @@ export default function AiAssistantPage() {
           </div>
         ) : messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-              <Bot className="w-8 h-8 text-primary" />
+            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 text-3xl">
+              {agent.emoji}
             </div>
-            <h2 className="text-xl font-bold text-foreground mb-2">Infrastructure AI Assistant</h2>
-            <p className="text-muted-foreground max-w-md mb-8">Your senior infrastructure engineer on demand. Ask me about deployments, troubleshooting, best practices, and more.</p>
+            <h2 className="text-xl font-bold text-foreground mb-1">{agent.label}</h2>
+            <p className="text-muted-foreground max-w-md mb-8 text-sm">{agent.description} — powered by Gemini AI. Ask anything about your infrastructure.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg">
               {STARTER_PROMPTS.map(prompt => (
                 <button key={prompt} onClick={() => sendMessage(prompt)}
@@ -213,8 +266,8 @@ export default function AiAssistantPage() {
             {messages.map(msg => (
               <div key={msg.id} className={`flex gap-4 ${msg.role === "user" ? "justify-end" : ""}`}>
                 {msg.role === "assistant" && (
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Bot className="w-4 h-4 text-primary" />
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 text-base">
+                    {agent.emoji}
                   </div>
                 )}
                 <div className={`max-w-2xl rounded-xl px-4 py-3 ${msg.role === "user" ? "bg-primary text-primary-foreground ml-12" : "bg-card border border-border"}`}>
@@ -224,13 +277,13 @@ export default function AiAssistantPage() {
             ))}
             {chat.isPending && (
               <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4 text-primary" />
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-base">
+                  {agent.emoji}
                 </div>
                 <div className="bg-card border border-border rounded-xl px-4 py-3">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm">Analyzing your infrastructure…</span>
+                    <span className="text-sm">{agent.label} is thinking…</span>
                   </div>
                 </div>
               </div>
@@ -241,23 +294,29 @@ export default function AiAssistantPage() {
 
         {/* Input */}
         <div className="border-t border-border p-4">
-          <div className="relative max-w-3xl mx-auto">
-            <Textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-              placeholder="Ask about deployments, troubleshooting, configuration… (Enter to send, Shift+Enter for newline)"
-              className="pr-12 resize-none min-h-[80px] max-h-[200px] font-sans"
-              data-testid="input-chat-message"
-            />
-            <button
-              onClick={() => sendMessage()}
-              disabled={!input.trim() || chat.isPending}
-              className="absolute right-3 bottom-3 p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
-              data-testid="btn-send-message"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+          <div className="relative max-w-3xl mx-auto space-y-2">
+            <div className="flex items-center gap-2">
+              <AgentSelector selected={selectedAgent} onSelect={setSelectedAgent} />
+              <span className="text-xs text-muted-foreground">Powered by Gemini AI</span>
+            </div>
+            <div className="relative">
+              <Textarea
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                placeholder={`Ask ${agent.label}… (Enter to send, Shift+Enter for newline)`}
+                className="pr-12 resize-none min-h-[80px] max-h-[200px] font-sans"
+                data-testid="input-chat-message"
+              />
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || chat.isPending}
+                className="absolute right-3 bottom-3 p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
+                data-testid="btn-send-message"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

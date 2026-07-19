@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import {
-  Plus, Search, RefreshCw, Wifi, WifiOff, Zap, X, Loader2,
-  Terminal, Server, Shield, ChevronDown, Eye
+  Plus, Search, RefreshCw, Wifi, WifiOff, X, Loader2,
+  Terminal, Server, Shield, Eye, Trash2, CheckCircle2, XCircle
 } from "lucide-react";
 import {
   useListServers, useListServerGroups, useTestServerConnection,
-  useCreateServer, getListServersQueryKey, ServerInputOs,
+  useCreateServer, getListServersQueryKey,
 } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -22,14 +22,14 @@ import { SshTerminal } from "@/components/ssh-terminal";
 interface AddServerForm {
   name: string; clientName: string; host: string; sshPort: string;
   sshUsername: string; sshAuthMethod: string; sshPassword: string;
-  os: string; osVersion: string; description: string;
+  deploymentStatus: string; notes: string;
 }
 
 function AddServerDialog({ orgId, onClose, onSuccess }: { orgId: number; onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState<AddServerForm>({
     name: "", clientName: "", host: "", sshPort: "22",
     sshUsername: "root", sshAuthMethod: "password", sshPassword: "",
-    os: "ubuntu", osVersion: "", description: "",
+    deploymentStatus: "online", notes: "",
   });
   const [error, setError] = useState("");
 
@@ -45,24 +45,22 @@ function AddServerDialog({ orgId, onClose, onSuccess }: { orgId: number; onClose
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!form.name || !form.host || !form.sshUsername) {
-      setError("Display name, hostname/IP, and SSH username are required.");
-      return;
-    }
+    if (!form.name.trim()) { setError("Display name is required."); return; }
+    if (!form.clientName.trim()) { setError("Client / Project is required."); return; }
+    if (!form.host.trim()) { setError("IP address / hostname is required."); return; }
+    if (!form.sshUsername.trim()) { setError("SSH username is required."); return; }
     create.mutate({
       orgId,
       data: {
-        name: form.name,
-        host: form.host,
+        name: form.name.trim(),
+        clientName: form.clientName.trim(),
+        host: form.host.trim(),
         sshPort: parseInt(form.sshPort) || 22,
-        sshUsername: form.sshUsername,
-        os: form.os as ServerInputOs,
-        osVersion: form.osVersion || undefined,
-        description: form.description || undefined,
-        // new fields passed via `as any` since codegen types haven't been refreshed
-        ...(form.clientName ? { clientName: form.clientName } : {}),
+        sshUsername: form.sshUsername.trim(),
         sshAuthMethod: form.sshAuthMethod,
         sshPassword: form.sshPassword || undefined,
+        description: form.notes || undefined,
+        status: form.deploymentStatus,
       } as any,
     });
   };
@@ -90,8 +88,19 @@ function AddServerDialog({ orgId, onClose, onSuccess }: { orgId: number; onClose
                 <Input placeholder="prod-web-01" value={form.name} onChange={e => set("name", e.target.value)} required />
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Client / Project</label>
-                <Input placeholder="Acme Corp" value={form.clientName} onChange={e => set("clientName", e.target.value)} />
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Client / Project *</label>
+                <Input placeholder="Acme Corp" value={form.clientName} onChange={e => set("clientName", e.target.value)} required />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Deployment Status *</label>
+                <select
+                  value={form.deploymentStatus}
+                  onChange={e => set("deploymentStatus", e.target.value)}
+                  className="w-full h-9 rounded-md border border-border bg-background text-sm px-3 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="online">Online</option>
+                  <option value="offline">Offline</option>
+                </select>
               </div>
             </div>
           </div>
@@ -105,7 +114,7 @@ function AddServerDialog({ orgId, onClose, onSuccess }: { orgId: number; onClose
                 <Input placeholder="192.168.1.10 or server.example.com" value={form.host} onChange={e => set("host", e.target.value)} required />
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">SSH Port</label>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">SSH Port *</label>
                 <Input type="number" placeholder="22" value={form.sshPort} onChange={e => set("sshPort", e.target.value)} />
               </div>
               <div>
@@ -135,7 +144,7 @@ function AddServerDialog({ orgId, onClose, onSuccess }: { orgId: number; onClose
               </div>
               {form.sshAuthMethod === "password" && (
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">SSH Password</label>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">SSH Password <span className="opacity-50">(optional)</span></label>
                   <Input type="password" placeholder="Leave empty to enter at connect" value={form.sshPassword} onChange={e => set("sshPassword", e.target.value)} />
                 </div>
               )}
@@ -154,36 +163,10 @@ function AddServerDialog({ orgId, onClose, onSuccess }: { orgId: number; onClose
             </div>
           </div>
 
-          {/* OS */}
-          <div>
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Operating System</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">OS Type</label>
-                <select
-                  value={form.os}
-                  onChange={e => set("os", e.target.value)}
-                  className="w-full h-9 rounded-md border border-border bg-background text-sm px-3 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="ubuntu">Ubuntu</option>
-                  <option value="debian">Debian</option>
-                  <option value="centos">CentOS</option>
-                  <option value="rhel">RHEL</option>
-                  <option value="windows">Windows</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Version <span className="opacity-50">(optional)</span></label>
-                <Input placeholder="22.04" value={form.osVersion} onChange={e => set("osVersion", e.target.value)} />
-              </div>
-            </div>
-          </div>
-
           {/* Notes */}
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Notes <span className="opacity-50">(optional)</span></label>
-            <Input placeholder="Primary web server for production traffic…" value={form.description} onChange={e => set("description", e.target.value)} />
+            <Input placeholder="Primary web server for production traffic…" value={form.notes} onChange={e => set("notes", e.target.value)} />
           </div>
 
           {error && <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>}
@@ -200,6 +183,23 @@ function AddServerDialog({ orgId, onClose, onSuccess }: { orgId: number; onClose
   );
 }
 
+// ── Test result toast ──────────────────────────────────────────────────────────
+function TestResult({ result, onClose }: { result: { success: boolean; message: string; latencyMs: number }; onClose: () => void }) {
+  return (
+    <div className={`fixed bottom-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg text-sm
+      ${result.success ? "bg-emerald-950 border-emerald-800 text-emerald-300" : "bg-red-950 border-red-800 text-red-300"}`}>
+      {result.success
+        ? <CheckCircle2 className="w-4 h-4 shrink-0" />
+        : <XCircle className="w-4 h-4 shrink-0" />}
+      <div>
+        <p className="font-medium">{result.success ? "Connection successful" : "Connection failed"}</p>
+        <p className="text-xs opacity-80">{result.message}{result.success ? ` · ${result.latencyMs}ms` : ""}</p>
+      </div>
+      <button onClick={onClose} className="ml-2 opacity-60 hover:opacity-100">×</button>
+    </div>
+  );
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function ServersPage() {
   const { orgId, token } = useAuth() as any;
@@ -207,8 +207,11 @@ export default function ServersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [testingId, setTestingId] = useState<number | null>(null);
+  const [testResult, setTestResult] = useState<any | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [sshServer, setSshServer] = useState<any | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const { data: servers, isLoading } = useListServers(orgId, {}, { query: { queryKey: getListServersQueryKey(orgId, {}) } });
   const { data: groups } = useListServerGroups(orgId, { query: { queryKey: ["server-groups", orgId] as any } });
@@ -223,8 +226,40 @@ export default function ServersPage() {
 
   const testConnection = async (serverId: number) => {
     setTestingId(serverId);
-    try { await testConn.mutateAsync({ orgId, serverId, data: {} } as any); }
-    finally { setTestingId(null); }
+    setTestResult(null);
+    try {
+      const result = await testConn.mutateAsync({ orgId, serverId, data: {} } as any) as any;
+      setTestResult(result);
+      // Refresh server list to pick up status update
+      qc.invalidateQueries({ queryKey: getListServersQueryKey(orgId, {}) });
+      setTimeout(() => setTestResult(null), 6000);
+    } catch {
+      setTestResult({ success: false, message: "Test failed", latencyMs: 0 });
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const deleteServer = async (serverId: number, name: string) => {
+    if (!confirm(`Delete server "${name}"? This cannot be undone.`)) return;
+    setDeletingId(serverId);
+    try {
+      const stored = localStorage.getItem("infra-auth");
+      const t = token ?? (stored ? JSON.parse(stored).token ?? "" : "");
+      await fetch(`/api/organizations/${orgId}/servers/${serverId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      qc.invalidateQueries({ queryKey: getListServersQueryKey(orgId, {}) });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await qc.invalidateQueries({ queryKey: getListServersQueryKey(orgId, {}) });
+    setTimeout(() => setIsRefreshing(false), 800);
   };
 
   const authIcon = (method?: string) => {
@@ -251,6 +286,9 @@ export default function ServersPage() {
           onClose={() => setSshServer(null)}
         />
       )}
+      {testResult && (
+        <TestResult result={testResult} onClose={() => setTestResult(null)} />
+      )}
 
       {/* Page intro */}
       <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
@@ -259,12 +297,11 @@ export default function ServersPage() {
             <Server className="w-5 h-5 text-primary" />
           </div>
           <div className="flex-1">
-            <h2 className="font-semibold text-foreground mb-1">Server Fleet</h2>
+            <h2 className="font-semibold text-foreground mb-1">Manage Servers</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Register, monitor and connect to your infrastructure. Add a server with its SSH credentials,
               then use <span className="text-foreground font-medium">Connect</span> to open an interactive terminal,
-              or <span className="text-foreground font-medium">Scan</span> from the detail page to collect hardware
-              info — OS, CPU, RAM, disk — automatically.
+              or use <span className="text-foreground font-medium">Test</span> to verify TCP connectivity.
             </p>
           </div>
         </div>
@@ -284,12 +321,11 @@ export default function ServersPage() {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Total",       value: allServers.length,                                            color: "text-foreground" },
-          { label: "Online",      value: allServers.filter(s => s.status === "online").length,         color: "text-emerald-400" },
-          { label: "Offline",     value: allServers.filter(s => s.status === "offline").length,        color: "text-red-400" },
-          { label: "Maintenance", value: allServers.filter(s => s.status === "maintenance").length,    color: "text-amber-400" },
+          { label: "Total",   value: allServers.length,                                     color: "text-foreground" },
+          { label: "Online",  value: allServers.filter(s => s.status === "online").length,  color: "text-emerald-400" },
+          { label: "Offline", value: allServers.filter(s => s.status === "offline").length, color: "text-red-400" },
         ].map(({ label, value, color }) => (
           <div key={label} className="rounded-lg border border-border bg-card px-4 py-3">
             <p className="text-xs text-muted-foreground">{label}</p>
@@ -316,18 +352,18 @@ export default function ServersPage() {
           className="text-sm bg-card border border-border rounded-md px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           data-testid="select-status-filter"
         >
-          <option value="">All Status</option>
+          <option value="">All Statuses</option>
           <option value="online">Online</option>
           <option value="offline">Offline</option>
-          <option value="unknown">Unknown</option>
-          <option value="maintenance">Maintenance</option>
         </select>
         <button
-          onClick={() => qc.invalidateQueries({ queryKey: getListServersQueryKey(orgId, {}) })}
-          className="p-2 rounded-md border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="p-2 rounded-md border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          title="Refresh server list"
           data-testid="btn-refresh-servers"
         >
-          <RefreshCw className="w-4 h-4" />
+          <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
         </button>
       </div>
 
@@ -339,7 +375,6 @@ export default function ServersPage() {
               <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Server</th>
               <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Client</th>
               <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Status</th>
-              <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">OS</th>
               <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3 min-w-[120px]">Resources</th>
               <th className="text-right text-xs font-medium text-muted-foreground px-4 py-3">Actions</th>
             </tr>
@@ -348,21 +383,18 @@ export default function ServersPage() {
             {isLoading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <tr key={i} className="border-b border-border last:border-0">
-                  <td colSpan={6} className="px-4 py-3"><Skeleton className="h-10 w-full" /></td>
+                  <td colSpan={5} className="px-4 py-3"><Skeleton className="h-10 w-full" /></td>
                 </tr>
               ))
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-16 text-muted-foreground">
+                <td colSpan={5} className="text-center py-16 text-muted-foreground">
                   <WifiOff className="w-10 h-10 mx-auto mb-3 opacity-30" />
                   <p className="font-medium">
                     {allServers.length === 0 ? "No servers added yet" : "No servers match your filters"}
                   </p>
                   {allServers.length === 0 && (
-                    <button
-                      onClick={() => setShowAdd(true)}
-                      className="mt-3 text-sm text-primary hover:underline"
-                    >
+                    <button onClick={() => setShowAdd(true)} className="mt-3 text-sm text-primary hover:underline">
                       Add your first server →
                     </button>
                   )}
@@ -395,11 +427,6 @@ export default function ServersPage() {
                   </td>
                   {/* Status */}
                   <td className="px-4 py-3"><StatusBadge status={server.status} /></td>
-                  {/* OS */}
-                  <td className="px-4 py-3">
-                    <p className="text-foreground capitalize">{server.os}</p>
-                    {server.osVersion && <p className="text-xs text-muted-foreground">{server.osVersion}</p>}
-                  </td>
                   {/* Resources */}
                   <td className="px-4 py-3">
                     <MetricGroup cpu={server.cpuUsage} mem={server.memUsage} disk={server.diskUsage} />
@@ -407,19 +434,19 @@ export default function ServersPage() {
                   {/* Actions */}
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
-                      {/* Test */}
+                      {/* Test connection */}
                       <button
                         onClick={() => testConnection(server.id)}
                         disabled={testingId === server.id}
                         className="p-1.5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                        title="Test SSH connectivity"
+                        title="Test TCP connectivity"
                         data-testid={`btn-test-${server.id}`}
                       >
                         {testingId === server.id
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           : <Wifi className="w-3.5 h-3.5" />}
                       </button>
-                      {/* Connect terminal */}
+                      {/* SSH terminal */}
                       <button
                         onClick={() => setSshServer(server)}
                         className="p-1.5 rounded text-muted-foreground hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors"
@@ -438,6 +465,18 @@ export default function ServersPage() {
                           <Eye className="w-3.5 h-3.5" />
                         </button>
                       </Link>
+                      {/* Delete */}
+                      <button
+                        onClick={() => deleteServer(server.id, server.name)}
+                        disabled={deletingId === server.id}
+                        className="p-1.5 rounded text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                        title="Delete server"
+                        data-testid={`btn-delete-${server.id}`}
+                      >
+                        {deletingId === server.id
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Trash2 className="w-3.5 h-3.5" />}
+                      </button>
                     </div>
                   </td>
                 </tr>

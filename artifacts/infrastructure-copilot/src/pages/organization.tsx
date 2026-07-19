@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Users, Building2, Shield, Trash2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Plus, Users, Building2, Shield, Trash2, CheckCircle2, AlertCircle, UserPlus, X, Loader2 } from "lucide-react";
 import { useGetOrganization, useListOrgMembers, useAddOrgMember, useUpdateOrgMember, useRemoveOrgMember, getGetOrganizationQueryKey, getListOrgMembersQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,9 @@ import { Input } from "@/components/ui/input";
 import { useQueryClient } from "@tanstack/react-query";
 
 const ROLE_CONFIG: Record<string, { label: string; color: string; description: string }> = {
-  admin: { label: "Admin", color: "bg-red-400/10 text-red-400", description: "Full access including org management" },
+  admin:    { label: "Admin",    color: "bg-red-400/10 text-red-400",    description: "Full access including org management" },
   reviewer: { label: "Reviewer", color: "bg-amber-400/10 text-amber-400", description: "Can approve or reject deployments" },
-  engineer: { label: "Engineer", color: "bg-blue-400/10 text-blue-400", description: "Can create and execute deployments" },
+  engineer: { label: "Engineer", color: "bg-blue-400/10 text-blue-400",  description: "Can create and execute deployments" },
 };
 
 function Toast({ type, message, onClose }: { type: "success" | "error"; message: string; onClose: () => void }) {
@@ -25,12 +25,120 @@ function Toast({ type, message, onClose }: { type: "success" | "error"; message:
   );
 }
 
+// ── Create Account Dialog (admin-direct) ──────────────────────────────────────
+function CreateAccountDialog({
+  orgId, onClose, onSuccess,
+}: {
+  orgId: number; onClose: () => void; onSuccess: () => void;
+}) {
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "engineer" });
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+
+  const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (!form.name.trim() || !form.email.trim() || !form.password) {
+      setError("All fields are required.");
+      return;
+    }
+    if (form.password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const stored = localStorage.getItem("infra-auth");
+      const token = stored ? JSON.parse(stored).token ?? "" : "";
+      const res = await fetch("/api/auth/admin/create-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Failed to create account");
+      }
+      onSuccess();
+      onClose();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to create account");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <UserPlus className="w-4 h-4 text-primary" />
+            <h2 className="font-semibold text-foreground">Create Account</h2>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Create an account directly without requiring the user to self-register. The account will be immediately active.
+          </p>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Full Name *</label>
+            <Input placeholder="Jane Smith" value={form.name} onChange={e => set("name", e.target.value)} required />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Email Address *</label>
+            <Input type="email" placeholder="jane@company.com" value={form.email} onChange={e => set("email", e.target.value)} required />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Temporary Password *</label>
+            <Input type="password" placeholder="Min. 8 characters" value={form.password} onChange={e => set("password", e.target.value)} required />
+            <p className="text-[10px] text-muted-foreground mt-1">Share this with the user — they can change it after logging in.</p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Role *</label>
+            <select
+              value={form.role}
+              onChange={e => set("role", e.target.value)}
+              className="w-full h-9 rounded-md border border-border bg-background text-sm px-3 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="engineer">Engineer — can create and execute deployments</option>
+              <option value="reviewer">Reviewer — can approve or reject deployments</option>
+              <option value="admin">Admin — full access including org management</option>
+            </select>
+          </div>
+
+          {error && <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+            <Button type="submit" size="sm" disabled={creating}>
+              {creating ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating…</> : "Create Account"}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────────
 export default function OrganizationPage() {
   const { orgId } = useAuth();
   const qc = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("engineer");
   const [inviting, setInviting] = useState(false);
+  const [showCreateAccount, setShowCreateAccount] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const { data: org } = useGetOrganization(orgId, { query: { queryKey: getGetOrganizationQueryKey(orgId) } });
@@ -54,7 +162,7 @@ export default function OrganizationPage() {
         setInviting(false);
         const status = err?.response?.status ?? err?.status;
         if (status === 404) {
-          showToast("error", "No account found for this email. Ask them to register first, then add them here.");
+          showToast("error", "No account with that email — use 'Create Account' to set one up directly.");
         } else if (status === 409) {
           showToast("error", "This user is already a member of your organisation.");
         } else {
@@ -78,15 +186,31 @@ export default function OrganizationPage() {
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
 
+      {showCreateAccount && (
+        <CreateAccountDialog
+          orgId={orgId}
+          onClose={() => setShowCreateAccount(false)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: getListOrgMembersQueryKey(orgId) });
+            showToast("success", "Account created successfully");
+          }}
+        />
+      )}
+
       {/* Org header */}
-      <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-          <Building2 className="w-6 h-6 text-primary" />
+      <div className="flex items-start justify-between">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Building2 className="w-6 h-6 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">{org?.name ?? "Organisation"}</h1>
+            <p className="text-muted-foreground text-sm mt-1">{allMembers.length} member{allMembers.length !== 1 ? "s" : ""}</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">{org?.name ?? "Organisation"}</h1>
-          <p className="text-muted-foreground text-sm mt-1">{allMembers.length} member{allMembers.length !== 1 ? "s" : ""}</p>
-        </div>
+        <Button size="sm" onClick={() => setShowCreateAccount(true)}>
+          <UserPlus className="w-4 h-4 mr-2" />Create Account
+        </Button>
       </div>
 
       {/* Role summary */}
@@ -105,13 +229,13 @@ export default function OrganizationPage() {
         ))}
       </div>
 
-      {/* Invite form */}
+      {/* Add existing member */}
       <div className="rounded-xl border border-border bg-card p-5">
         <h2 className="font-semibold text-foreground mb-1 flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Add a member
+          <Plus className="w-4 h-4" /> Add existing member
         </h2>
         <p className="text-xs text-muted-foreground mb-4">
-          The person must already have a GuideX account. If they haven't registered yet, ask them to sign up first.
+          Enter the email of someone who already has a GuideX account. To create a new account, use the <strong>Create Account</strong> button above.
         </p>
         <form onSubmit={handleInvite} className="flex items-center gap-3">
           <Input
@@ -132,7 +256,7 @@ export default function OrganizationPage() {
             <option value="admin">Admin</option>
           </select>
           <Button type="submit" size="sm" disabled={inviting}>
-            {inviting ? "Adding…" : "Add Member"}
+            {inviting ? "Adding…" : "Add"}
           </Button>
         </form>
       </div>
@@ -149,7 +273,7 @@ export default function OrganizationPage() {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Users className="w-10 h-10 text-muted-foreground/40 mb-3" />
             <p className="font-medium text-muted-foreground">No members yet</p>
-            <p className="text-sm text-muted-foreground/60 mt-1">Add your first team member above</p>
+            <p className="text-sm text-muted-foreground/60 mt-1">Create or add team members above</p>
           </div>
         ) : (
           <div className="divide-y divide-border">

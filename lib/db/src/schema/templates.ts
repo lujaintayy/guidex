@@ -12,9 +12,10 @@ export const templatesTable = pgTable("templates", {
   orgId: integer("org_id").references(() => organizationsTable.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
-  category: templateCategoryEnum("category").notNull(),
-  software: varchar("software", { length: 100 }).notNull(),
-  version: varchar("version", { length: 50 }).notNull(),
+  scriptContent: text("script_content"),
+  category: templateCategoryEnum("category").notNull().default("other"),
+  software: varchar("software", { length: 100 }).notNull().default(""),
+  version: varchar("version", { length: 50 }).notNull().default("1.0.0"),
   osRequirements: jsonb("os_requirements").$type<string[]>().default([]),
   steps: jsonb("steps").$type<Array<{
     order: number;
