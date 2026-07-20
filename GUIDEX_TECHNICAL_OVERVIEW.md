@@ -127,13 +127,13 @@ All API calls go through generated hooks (`useListServers`, `useGetServer`, `use
 | `/servers/:id` | `servers/detail.tsx` | Single server detail, SSH terminal, scan results |
 | `/deployments` | `deployments/index.tsx` | Deployment list and status board |
 | `/deployments/:id` | `deployments/detail.tsx` | Single deployment detail and log output |
-| `/templates` | `templates.tsx` | Script template library with AI Auto-fill |
+| `/templates` | `templates.tsx` | Script template library with search/filtering, AI script generation & Auto-fill |
 | `/monitoring` | `monitoring.tsx` | Alert feed and server health overview |
-| `/ai` | `ai-assistant.tsx` | Multi-agent AI chat (5 personas powered by Gemini) |
+| `/ai` | `ai-assistant.tsx` | Multi-agent AI chat (5 personas, user-selectable ChatGPT/Claude/Gemini) |
 | `/audit-logs` | `audit-logs.tsx` | Expandable audit event log with metadata |
 | `/documents` | `documents.tsx` | Document generator (placeholder & server report modes) |
 | `/reports` | `reports.tsx` | Report generator with server scoping and date range |
-| `/organization` | `organization.tsx` | Team membership, invite, admin create-user |
+| `/organization` | `organization.tsx` | Deduplicated members list; admin-only management (create account, change role, remove) |
 | `/user-requests` | `user-requests.tsx` | Pending registration approval queue (admin) |
 | `/guidex` | `guidex.tsx` | Platform info / about page |
 | `/login` | `login.tsx` | Email + password login |
@@ -175,6 +175,23 @@ All API calls go through generated hooks (`useListServers`, `useGetServer`, `use
 2. Email verified → status becomes `pending_approval`
 3. Admin approves → status becomes `active` → user can log in
 4. Admins can also create accounts directly (bypassing OTP/approval) via `/auth/admin/create-user`
+5. Self-service password reset: user requests a reset link by email → time-limited token → sets a new password without admin help
+
+### Role-Based Access Control (RBAC)
+
+Three roles are enforced server-side in `authMiddleware` and per-route guards:
+
+| Role | Permissions |
+|---|---|
+| **admin** | Full access, including user/member management (create accounts, change roles, remove members) |
+| **engineer** | Everything except user management — servers, deployments, templates, documents, reports, monitoring, AI |
+| **reviewer** | View-only across the platform, plus exactly two write actions: generating documents and generating reports (and changing their own password) |
+
+Key implementation details:
+- The **effective role is resolved from `org_members` for the org in the request path** (falling back to the user's global role), so stale global roles can never grant or deny the wrong permissions.
+- Member management routes (`POST/PATCH/DELETE /organizations/:orgId/members*`) verify the caller is an **admin of that specific org**.
+- Role changes keep `users.role` and `org_members.role` in sync.
+- The frontend mirrors these rules: reviewers see no create/edit/delete buttons, and member management UI (Create Account, role select, remove) is visible to admins only.
 
 ### Database Access
 
@@ -193,7 +210,18 @@ All API calls go through generated hooks (`useListServers`, `useGetServer`, `use
 
 ### AI Integration
 
-All AI calls use the **Replit AI Integrations proxy** which exposes an OpenAI-compatible endpoint backed by **Gemini 2.0 Flash**. Secrets `AI_INTEGRATIONS_GEMINI_API_KEY` and `AI_INTEGRATIONS_GEMINI_BASE_URL` are injected at runtime.
+All AI calls go through the **Replit AI Integrations proxy** with per-provider secrets (`AI_INTEGRATIONS_ANTHROPIC_*`, `AI_INTEGRATIONS_OPENAI_*`, `AI_INTEGRATIONS_GEMINI_*`) injected at runtime.
+
+**All automated AI generation uses Claude (claude-sonnet-4-6 via the Anthropic SDK):**
+
+| Feature | Model |
+|---|---|
+| Document generation | Claude |
+| Report generation | Claude |
+| Template script generation (generate a script from requirements) | Claude |
+| Template script analysis (AI Auto-fill: infer name/software/description) | Claude |
+| Deployment analysis & troubleshooting | Claude |
+| AI chat assistant | User-selectable provider (ChatGPT, Claude, or Gemini) |
 
 Five agent personas are defined in `routes/ai.ts`, each with a distinct system prompt:
 
@@ -205,22 +233,22 @@ Five agent personas are defined in `routes/ai.ts`, each with a distinct system p
 | `troubleshooter` | Incident response and root-cause analyst |
 | `database` | Database performance and query advisor |
 
-Each chat request loads the last 20 messages from the conversation as context before calling Gemini.
+Each chat request loads the last 20 messages from the conversation as context before calling the selected model.
 
 ### API Route Modules
 
 | File | Routes Covered |
 |---|---|
-| `routes/auth.ts` | Register, verify OTP, login, logout, reset password, admin create-user, pending-users list, approve/decline |
+| `routes/auth.ts` | Register, verify OTP, login, logout, forgot/reset password (email token flow), change own password, admin create-user, pending-users list, approve/decline |
 | `routes/servers.ts` | CRUD for servers and server groups, TCP test-connection, health endpoint, server scan |
 | `routes/deployments.ts` | CRUD for deployments, status updates, recent deployments |
-| `routes/templates.ts` | CRUD for script templates, AI script analyzer (`/analyze`) |
+| `routes/templates.ts` | CRUD for script templates with filtering/search, AI script generation (`/generate-script`, Claude), AI script analyzer (`/analyze`, Claude) |
 | `routes/monitoring.ts` | Alerts CRUD, monitoring overview |
-| `routes/ai.ts` | Conversations, message send (with Gemini), conversation history |
+| `routes/ai.ts` | Conversations, message send (provider of user's choice), deployment analysis & troubleshooting (Claude), conversation history |
 | `routes/audit.ts` | Audit log listing with filters |
 | `routes/documents.ts` | Document generation (placeholder templates + server reports) |
 | `routes/reports.ts` | Report generation with server scoping and date range |
-| `routes/organizations.ts` | Org stats, member management |
+| `routes/organizations.ts` | Org stats, member listing (deduplicated), admin-only member management with org-scoped admin checks |
 | `routes/notifications.ts` | Notification listing and mark-as-read |
 
 ---
@@ -295,7 +323,7 @@ This keeps the frontend completely decoupled from raw fetch calls and gives auto
 | **Secrets** | Managed via Replit Secrets (never in source code): `SESSION_SECRET`, `SMTP_*`, `RESEND_API_KEY`, `AI_INTEGRATIONS_*`, `BOOTSTRAP_ADMIN_PASSWORD` |
 | **Database** | Replit-managed PostgreSQL; `DATABASE_URL` injected automatically |
 | **Email** | Nodemailer over SMTP (configurable via `SMTP_HOST/PORT/USER/PASS/FROM` secrets) |
-| **AI** | Replit AI Integrations proxy → Gemini 2.0 Flash (OpenAI-compatible API surface) |
+| **AI** | Replit AI Integrations proxy → Claude (claude-sonnet-4-6) for all generation features; ChatGPT/Claude/Gemini selectable in chat |
 
 ---
 
@@ -364,17 +392,19 @@ This handles both the old array shape and the new paginated object shape, making
 
 ---
 
-### Challenge 7 — Gemini AI Integration Setup
+### Challenge 7 — Real AI Integration (and the Migration to Claude)
 
 **Problem:** The AI assistant originally used a hardcoded string-matching function (`generateAiResponse()`) that pattern-matched keywords in the user's message and returned canned responses. It had no real intelligence and no conversation memory.
 
-**Solution:** Integrated Gemini 2.0 Flash via Replit's AI Integrations proxy (OpenAI-compatible endpoint). The backend now:
+**Solution:** Integrated real LLMs via Replit's AI Integrations proxy. The backend now:
 1. Loads the last 20 messages from the conversation as history
 2. Prepends the selected agent's system prompt
-3. Sends the full context to Gemini
+3. Sends the full context to the model
 4. Streams the response back and persists it to the `ai_messages` table
 
 Five distinct agent personas were defined, each with a system prompt tailored to their domain (security, deployment, troubleshooting, databases, general copilot).
+
+The platform initially used Gemini for everything; it was later standardized so that **all automated generation (documents, reports, template scripts, analysis, troubleshooting) uses Claude (claude-sonnet-4-6)**, while the chat assistant lets the user pick ChatGPT, Claude, or Gemini per conversation. One quirk worth noting: calling Gemini through the Replit proxy requires passing `apiVersion: ""` in `httpOptions`, otherwise the SDK's `/v1beta/` prefix breaks the endpoint.
 
 ---
 
@@ -382,7 +412,18 @@ Five distinct agent personas were defined, each with a system prompt tailored to
 
 **Problem:** The templates table had no column to store the actual shell script content. Templates were name/description metadata only, making them useless for actual deployment execution.
 
-**Solution:** Added a `script_content TEXT` column to the `templates` schema via Drizzle and ran `db push` to apply it to the live database. The create/edit API routes were updated to accept and persist `scriptContent`. The frontend template dialog was redesigned so the script textarea is the primary input, with an "AI Auto-fill" button that calls a `/templates/analyze` endpoint — which sends the script to Gemini and returns the inferred software name and description.
+**Solution:** Added a `script_content TEXT` column to the `templates` schema via Drizzle and ran `db push` to apply it to the live database. The create/edit API routes were updated to accept and persist `scriptContent`. The frontend template dialog was redesigned so the script textarea is the primary input, with an "AI Auto-fill" button that calls a `/templates/analyze` endpoint — which sends the script to Claude and returns the inferred software name and description. A separate `/templates/generate-script` endpoint generates a complete script from user requirements, also via Claude.
+
+---
+
+### Challenge 9 — Stale Roles & Duplicate Memberships
+
+**Problem:** An engineer was wrongly blocked as a "reviewer" because their global `users.role` had drifted out of sync with their `org_members.role`, and the org page showed the same member multiple times due to duplicate membership rows.
+
+**Solution:**
+- `authMiddleware` now resolves the **effective role from the org membership row matching the org in the request path**, falling back to the global role only for non-org routes.
+- Admin checks on member-management routes verify admin membership **in that specific org** (prevents cross-org privilege leaks).
+- The members endpoint deduplicates by user (keeping the earliest join), duplicate DB rows were cleaned up, and role changes now write both tables in sync.
 
 ---
 
