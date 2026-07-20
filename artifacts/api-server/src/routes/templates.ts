@@ -72,6 +72,7 @@ router.delete("/organizations/:orgId/templates/:templateId", async (req, res) =>
 });
 
 // AI analysis of script content
+// Kept for backward-compat — analyzes a script and returns metadata
 router.post("/organizations/:orgId/templates/analyze", async (req, res) => {
   const { scriptContent } = req.body;
   if (!scriptContent || typeof scriptContent !== "string") {
@@ -81,48 +82,80 @@ router.post("/organizations/:orgId/templates/analyze", async (req, res) => {
 
   const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
   const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
+  if (!apiKey || !baseUrl) { res.status(503).json({ error: "AI service not configured" }); return; }
 
-  if (!apiKey || !baseUrl) {
-    res.status(503).json({ error: "AI service not configured" });
+  try {
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl, apiVersion: "" } });
+    const prompt = `Analyze this shell/bash script and return ONLY valid JSON (no markdown, no code fences) with these fields:
+{"software":"the main software package being installed or configured","description":"one sentence describing what this script does","name":"a concise template name"}
+Script:\n${scriptContent.substring(0, 3000)}`;
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { maxOutputTokens: 512 },
+    });
+    const text = response.text ?? "{}";
+    let result: any;
+    try { result = JSON.parse(text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()); }
+    catch { result = { software: "", description: "Script analysis failed", name: "" }; }
+    res.json(result);
+  } catch (err: any) {
+    console.error("[templates/analyze]", err);
+    res.status(500).json({ error: err?.message ?? "Analysis failed" });
+  }
+});
+
+// Generate a bash script from name + software + description requirements
+router.post("/organizations/:orgId/templates/generate-script", async (req, res) => {
+  const { name, software, description } = req.body;
+  if (!name || !software || !description) {
+    res.status(400).json({ error: "name, software, and description are required" });
     return;
   }
+
+  const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
+  const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
+  if (!apiKey || !baseUrl) { res.status(503).json({ error: "AI service not configured" }); return; }
 
   try {
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl, apiVersion: "" } });
 
-    const prompt = `Analyze this shell/bash script and return ONLY valid JSON (no markdown, no code fences) with these fields:
-{
-  "software": "the main software package being installed or configured (e.g. nginx, docker, postgresql)",
-  "description": "one sentence describing what this script does",
-  "name": "a concise template name (e.g. 'Nginx with SSL Setup')"
-}
+    const prompt = `You are a senior Linux systems engineer. Write a production-quality bash installation/configuration script based on these requirements:
 
-Script:
-${scriptContent.substring(0, 3000)}`;
+Template Name: ${name}
+Software Package: ${software}
+Description: ${description}
+
+Requirements for the script:
+- Start with #!/bin/bash and set -euo pipefail
+- Include a clear header comment block with the template name, software, description, and date
+- Support Ubuntu/Debian (use apt-get) as primary, with CentOS/RHEL fallback if relevant
+- Run non-interactive (use DEBIAN_FRONTEND=noninteractive, -y flags, etc.)
+- Include proper error handling and informational echo statements at each major step
+- Add any required service enablement and startup (systemctl enable + start)
+- Include basic validation/health checks at the end (e.g. verify service is running, version check)
+- Add configuration steps appropriate for the software (e.g. firewall rules, default config, security hardening)
+- Comment each major section clearly
+- Do NOT use placeholder values — write real, runnable commands
+
+Return ONLY the bash script with no explanation, no markdown code fences, no preamble.`;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        systemInstruction: "You are an infrastructure engineer. Analyze shell/bash scripts and return structured JSON information only.",
-        maxOutputTokens: 512,
-      },
+      config: { maxOutputTokens: 4096 },
     });
 
-    const text = response.text ?? "{}";
-    let result: { software: string; description: string; name: string };
-    try {
-      const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      result = JSON.parse(cleaned);
-    } catch {
-      result = { software: "", description: "Script analysis failed", name: "" };
-    }
+    let script = response.text?.trim() ?? "";
+    // Strip markdown fences if the model added them
+    script = script.replace(/^```(?:bash|sh)?\n?/i, "").replace(/\n?```$/i, "").trim();
 
-    res.json(result);
+    res.json({ script });
   } catch (err: any) {
-    console.error("[templates/analyze]", err);
-    res.status(500).json({ error: err?.message ?? "Analysis failed" });
+    console.error("[templates/generate-script]", err);
+    res.status(500).json({ error: err?.message ?? "Script generation failed" });
   }
 });
 

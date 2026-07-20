@@ -23,8 +23,8 @@ function CreateTemplateDialog({ orgId, onClose, onSuccess }: { orgId: number; on
   const [form, setForm] = useState({
     name: "", software: "", description: "", scriptContent: "",
   });
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analyzeError, setAnalyzeError] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState("");
   const [error, setError] = useState("");
 
   const create = useCreateTemplate({
@@ -36,30 +36,35 @@ function CreateTemplateDialog({ orgId, onClose, onSuccess }: { orgId: number; on
 
   const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
 
-  const analyzeScript = async () => {
-    if (!form.scriptContent.trim()) { setAnalyzeError("Paste a script first."); return; }
-    setAnalyzing(true);
-    setAnalyzeError("");
+  // All three fields required before AI can generate
+  const canGenerate = form.name.trim().length > 0 && form.software.trim().length > 0 && form.description.trim().length > 0;
+
+  const generateScript = async () => {
+    if (!canGenerate) return;
+    setGenerating(true);
+    setGenerateError("");
     try {
       const stored = localStorage.getItem("infra-auth");
       const token = stored ? JSON.parse(stored).token ?? "" : "";
-      const res = await fetch(`/api/organizations/${orgId}/templates/analyze`, {
+      const res = await fetch(`/api/organizations/${orgId}/templates/generate-script`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ scriptContent: form.scriptContent }),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          software: form.software.trim(),
+          description: form.description.trim(),
+        }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as any).error ?? `Error ${res.status}`);
+      }
       const data = await res.json();
-      setForm(p => ({
-        ...p,
-        name: data.name || p.name,
-        software: data.software || p.software,
-        description: data.description || p.description,
-      }));
+      setForm(p => ({ ...p, scriptContent: data.script ?? "" }));
     } catch (e: any) {
-      setAnalyzeError(e?.message ?? "Analysis failed");
+      setGenerateError(e?.message ?? "Script generation failed");
     } finally {
-      setAnalyzing(false);
+      setGenerating(false);
     }
   };
 
@@ -68,12 +73,13 @@ function CreateTemplateDialog({ orgId, onClose, onSuccess }: { orgId: number; on
     setError("");
     if (!form.name.trim()) { setError("Template name is required."); return; }
     if (!form.software.trim()) { setError("Software package is required."); return; }
+    if (!form.description.trim()) { setError("Description is required."); return; }
     create.mutate({
       orgId,
       data: {
         name: form.name.trim(),
         software: form.software.trim(),
-        description: form.description.trim() || undefined,
+        description: form.description.trim(),
         scriptContent: form.scriptContent.trim() || undefined,
       } as any,
     });
@@ -93,73 +99,102 @@ function CreateTemplateDialog({ orgId, onClose, onSuccess }: { orgId: number; on
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Script content with AI analyze */}
+          {/* Step 1 — Template Name */}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              Template Name <span className="text-destructive">*</span>
+            </label>
+            <Input
+              placeholder="e.g. Nginx with SSL Setup"
+              value={form.name}
+              onChange={e => set("name", e.target.value)}
+              required
+            />
+          </div>
+
+          {/* Step 2 — Software Package */}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              Software Package <span className="text-destructive">*</span>
+            </label>
+            <Input
+              placeholder="e.g. nginx, docker, postgresql, node"
+              value={form.software}
+              onChange={e => set("software", e.target.value)}
+              required
+            />
+          </div>
+
+          {/* Step 3 — Description */}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              Description <span className="text-destructive">*</span>
+            </label>
+            <textarea
+              rows={3}
+              placeholder="Describe what this template should install and configure — the more detail you provide, the better the generated script will be.&#10;&#10;e.g. Install Nginx on Ubuntu, configure SSL with Let's Encrypt, set up a reverse proxy for port 3000, enable UFW firewall rules, and start the service on boot."
+              value={form.description}
+              onChange={e => set("description", e.target.value)}
+              className="w-full rounded-md border border-border bg-background text-sm px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+              required
+            />
+          </div>
+
+          {/* Step 4 — Script (generated or manual) */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                <Code2 className="w-3.5 h-3.5" />Script / Template Content
+                <Code2 className="w-3.5 h-3.5" />
+                Script / Template Content
               </label>
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
-                onClick={analyzeScript}
-                disabled={analyzing || !form.scriptContent.trim()}
-                className="h-6 text-xs px-2 gap-1"
+                variant={canGenerate ? "default" : "outline"}
+                onClick={generateScript}
+                disabled={generating || !canGenerate}
+                title={!canGenerate ? "Fill in Name, Software Package, and Description first" : "Generate a script from your requirements"}
+                className="h-7 text-xs px-3 gap-1.5"
               >
-                {analyzing
-                  ? <><Loader2 className="w-3 h-3 animate-spin" />Analyzing…</>
+                {generating
+                  ? <><Loader2 className="w-3 h-3 animate-spin" />Generating…</>
                   : <><Wand2 className="w-3 h-3" />AI Auto-fill</>}
               </Button>
             </div>
+
+            {/* Hint when fields not yet filled */}
+            {!canGenerate && (
+              <div className="mb-2 flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <Wand2 className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                <p className="text-xs text-muted-foreground">
+                  Fill in <strong>Name</strong>, <strong>Software Package</strong>, and <strong>Description</strong> above — then click <strong>AI Auto-fill</strong> to generate a production-ready script automatically.
+                </p>
+              </div>
+            )}
+
             <textarea
-              rows={8}
-              placeholder="Paste your shell script or configuration here…&#10;&#10;Example:&#10;#!/bin/bash&#10;apt-get update -y&#10;apt-get install -y nginx&#10;systemctl enable nginx && systemctl start nginx"
+              rows={10}
+              placeholder={canGenerate
+                ? "Click AI Auto-fill to generate a script, or type one manually…"
+                : "Script will appear here after AI Auto-fill, or you can write one manually…"}
               value={form.scriptContent}
               onChange={e => set("scriptContent", e.target.value)}
               className="w-full rounded-md border border-border bg-background text-xs px-3 py-2 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring resize-y"
             />
-            {analyzeError && <p className="text-xs text-destructive mt-1">{analyzeError}</p>}
-            <p className="text-xs text-muted-foreground mt-1">
-              Click <strong>AI Auto-fill</strong> to automatically detect the software package and description from your script.
-            </p>
-          </div>
-
-          {/* Name & software */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Template Name *</label>
-              <Input
-                placeholder="e.g. Nginx with SSL Setup"
-                value={form.name}
-                onChange={e => set("name", e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Software Package *</label>
-              <Input
-                placeholder="e.g. nginx, docker, postgresql"
-                value={form.software}
-                onChange={e => set("software", e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Description <span className="opacity-50">(optional)</span></label>
-              <Input
-                placeholder="What does this template install/configure?"
-                value={form.description}
-                onChange={e => set("description", e.target.value)}
-              />
-            </div>
+            {generateError && <p className="text-xs text-destructive mt-1">{generateError}</p>}
+            {generating && (
+              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                AI is writing your script — this takes a few seconds…
+              </p>
+            )}
           </div>
 
           {error && <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>}
 
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={create.isPending}>
+            <Button type="submit" disabled={create.isPending || !form.name.trim() || !form.software.trim() || !form.description.trim()}>
               {create.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating…</> : "Create Template"}
             </Button>
           </div>
