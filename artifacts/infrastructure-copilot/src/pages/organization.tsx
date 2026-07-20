@@ -131,6 +131,92 @@ function CreateAccountDialog({
   );
 }
 
+// ── Member row — isolated per-row mutations so one row's state never bleeds into another ──
+function MemberRow({
+  member, orgId, onRemoved, onRoleChanged,
+}: {
+  member: any;
+  orgId: number;
+  onRemoved: () => void;
+  onRoleChanged: () => void;
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Each row owns its own mutation instance — no shared state between rows
+  const removeMember = useRemoveOrgMember({
+    mutation: { onSuccess: onRemoved },
+  });
+  const updateRole = useUpdateOrgMember({
+    mutation: { onSuccess: onRoleChanged },
+  });
+
+  const handleDelete = () => {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    removeMember.mutate({ orgId, userId: member.userId } as any);
+    setConfirmDelete(false);
+  };
+
+  const handleRoleChange = (newRole: string) => {
+    updateRole.mutate({ orgId, userId: member.userId, data: { role: newRole } } as any);
+  };
+
+  return (
+    <div className="flex items-center gap-4 px-4 py-3">
+      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-foreground shrink-0">
+        {(member.name ?? member.email ?? "?")[0].toUpperCase()}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-foreground truncate">{member.name ?? member.email}</p>
+        <p className="text-xs text-muted-foreground truncate">{member.email}</p>
+      </div>
+
+      <select
+        value={member.role}
+        onChange={e => handleRoleChange(e.target.value)}
+        disabled={updateRole.isPending}
+        className="h-7 rounded-md border border-border bg-background text-xs px-2 text-foreground disabled:opacity-50"
+      >
+        <option value="engineer">Engineer</option>
+        <option value="reviewer">Reviewer</option>
+        <option value="admin">Admin</option>
+      </select>
+
+      {confirmDelete ? (
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-xs text-destructive mr-1">Remove?</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+            disabled={removeMember.isPending}
+            onClick={handleDelete}
+          >
+            {removeMember.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Yes"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => setConfirmDelete(false)}
+          >
+            No
+          </Button>
+        </div>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:text-destructive shrink-0"
+          disabled={removeMember.isPending}
+          onClick={() => setConfirmDelete(true)}
+        >
+          <Trash2 className="w-4 h-4" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function OrganizationPage() {
   const { orgId } = useAuth();
@@ -150,10 +236,12 @@ export default function OrganizationPage() {
     setTimeout(() => setToast(null), 5000);
   };
 
+  const refreshMembers = () => qc.invalidateQueries({ queryKey: getListOrgMembersQueryKey(orgId) });
+
   const addMember = useAddOrgMember({
     mutation: {
       onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getListOrgMembersQueryKey(orgId) });
+        refreshMembers();
         setInviteEmail("");
         setInviting(false);
         showToast("success", "Member added successfully");
@@ -172,9 +260,6 @@ export default function OrganizationPage() {
     },
   });
 
-  const updateRole = useUpdateOrgMember({ mutation: { onSuccess: () => qc.invalidateQueries({ queryKey: getListOrgMembersQueryKey(orgId) }) } });
-  const removeMember = useRemoveOrgMember({ mutation: { onSuccess: () => qc.invalidateQueries({ queryKey: getListOrgMembersQueryKey(orgId) }) } });
-
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail) return;
@@ -191,7 +276,7 @@ export default function OrganizationPage() {
           orgId={orgId}
           onClose={() => setShowCreateAccount(false)}
           onSuccess={() => {
-            qc.invalidateQueries({ queryKey: getListOrgMembersQueryKey(orgId) });
+            refreshMembers();
             showToast("success", "Account created successfully");
           }}
         />
@@ -278,32 +363,16 @@ export default function OrganizationPage() {
         ) : (
           <div className="divide-y divide-border">
             {allMembers.map((m: any) => (
-              <div key={m.userId ?? m.email} className="flex items-center gap-4 px-4 py-3">
-                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-foreground shrink-0">
-                  {(m.name ?? m.email ?? "?")[0].toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{m.name ?? m.email}</p>
-                  <p className="text-xs text-muted-foreground truncate">{m.email}</p>
-                </div>
-                <select
-                  value={m.role}
-                  onChange={e => updateRole.mutate({ orgId, userId: m.userId, data: { role: e.target.value } } as any)}
-                  className="h-7 rounded-md border border-border bg-background text-xs px-2 text-foreground"
-                >
-                  <option value="engineer">Engineer</option>
-                  <option value="reviewer">Reviewer</option>
-                  <option value="admin">Admin</option>
-                </select>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive shrink-0"
-                  onClick={() => removeMember.mutate({ orgId, userId: m.userId } as any)}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </div>
+              <MemberRow
+                key={m.userId ?? m.email}
+                member={m}
+                orgId={orgId}
+                onRemoved={() => {
+                  refreshMembers();
+                  showToast("success", `${m.name ?? m.email} removed`);
+                }}
+                onRoleChanged={refreshMembers}
+              />
             ))}
           </div>
         )}
