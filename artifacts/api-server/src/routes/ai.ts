@@ -203,7 +203,7 @@ Return JSON ONLY with: { summary, whyRequired, benefits (array), risks (array of
 
   let analysis;
   try {
-    const text = await callAI("gemini", [{ role: "user", content: analysisPrompt }]);
+    const text = await callAI("claude", [{ role: "user", content: analysisPrompt }]);
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     try { analysis = JSON.parse(cleaned); } catch { analysis = null; }
   } catch { analysis = null; }
@@ -244,7 +244,7 @@ router.post("/organizations/:orgId/ai/troubleshoot", async (req, res) => {
     const prompt = `Troubleshoot this infrastructure issue and return JSON ONLY:
 Issue: ${description}
 Return: { rootCause, explanation, severity (critical/high/medium/low), recommendations (array of {action, command, explanation}) }`;
-    const text = await callAI("gemini", [{ role: "user", content: prompt }]);
+    const text = await callAI("claude", [{ role: "user", content: prompt }]);
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     try { result = JSON.parse(cleaned); } catch { result = null; }
   } catch { result = null; }

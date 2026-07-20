@@ -104,13 +104,28 @@ router.get("/organizations/:orgId/members", async (req, res) => {
     .from(orgMembersTable)
     .innerJoin(usersTable, eq(orgMembersTable.userId, usersTable.id))
     .where(eq(orgMembersTable.orgId, orgId));
-  res.json(members);
+  // Deduplicate by userId (keep earliest join) — duplicate membership rows may exist
+  members.sort((a, b) => new Date(a.joinedAt as any).getTime() - new Date(b.joinedAt as any).getTime());
+  const seen = new Set<number>();
+  const unique = members.filter((m) => {
+    if (seen.has(m.userId)) return false;
+    seen.add(m.userId);
+    return true;
+  });
+  res.json(unique);
 });
 
-// Only org admins may manage members (add / change role / remove)
-function requireAdmin(req: Parameters<typeof getUser>[0], res: import("express").Response): boolean {
+// Only org admins may manage members (add / change role / remove).
+// Checks the caller's membership role in THIS org (not their global role).
+async function requireAdmin(req: Parameters<typeof getUser>[0], res: import("express").Response): Promise<boolean> {
   const me = getUser(req);
-  if (me.role !== "admin") {
+  const orgId = parseInt((req.params as Record<string, string>)["orgId"] ?? "0");
+  const [membership] = await db
+    .select({ role: orgMembersTable.role })
+    .from(orgMembersTable)
+    .where(and(eq(orgMembersTable.orgId, orgId), eq(orgMembersTable.userId, me.id)))
+    .limit(1);
+  if (membership?.role !== "admin") {
     res.status(403).json({ error: "Only admins can manage organization members" });
     return false;
   }
@@ -118,7 +133,7 @@ function requireAdmin(req: Parameters<typeof getUser>[0], res: import("express")
 }
 
 router.post("/organizations/:orgId/members", async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const orgId = parseInt(req.params["orgId"] ?? "0");
   const user = getUser(req);
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, req.body.email)).limit(1);
@@ -132,7 +147,7 @@ router.post("/organizations/:orgId/members", async (req, res) => {
 });
 
 router.patch("/organizations/:orgId/members/:userId", async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const orgId = parseInt(req.params["orgId"] ?? "0");
   const userId = parseInt(req.params["userId"] ?? "0");
   await db.update(orgMembersTable).set({ role: req.body.role }).where(and(eq(orgMembersTable.orgId, orgId), eq(orgMembersTable.userId, userId)));
@@ -146,7 +161,7 @@ router.patch("/organizations/:orgId/members/:userId", async (req, res) => {
 });
 
 router.delete("/organizations/:orgId/members/:userId", async (req, res) => {
-  if (!requireAdmin(req, res)) return;
+  if (!(await requireAdmin(req, res))) return;
   const orgId = parseInt(req.params["orgId"] ?? "0");
   const userId = parseInt(req.params["userId"] ?? "0");
   await db.delete(orgMembersTable).where(and(eq(orgMembersTable.orgId, orgId), eq(orgMembersTable.userId, userId)));

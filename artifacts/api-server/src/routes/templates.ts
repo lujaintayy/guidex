@@ -80,22 +80,22 @@ router.post("/organizations/:orgId/templates/analyze", async (req, res) => {
     return;
   }
 
-  const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
-  const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
-  if (!apiKey || !baseUrl) { res.status(503).json({ error: "AI service not configured" }); return; }
+  const apiKey = process.env["AI_INTEGRATIONS_ANTHROPIC_API_KEY"];
+  const baseURL = process.env["AI_INTEGRATIONS_ANTHROPIC_BASE_URL"];
+  if (!apiKey || !baseURL) { res.status(503).json({ error: "AI service not configured" }); return; }
 
   try {
-    const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl, apiVersion: "" } });
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const claude = new Anthropic({ apiKey, baseURL });
     const prompt = `Analyze this shell/bash script and return ONLY valid JSON (no markdown, no code fences) with these fields:
 {"software":"the main software package being installed or configured","description":"one sentence describing what this script does","name":"a concise template name"}
 Script:\n${scriptContent.substring(0, 3000)}`;
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { maxOutputTokens: 512 },
+    const response = await claude.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 512,
+      messages: [{ role: "user", content: prompt }],
     });
-    const text = response.text ?? "{}";
+    const text = response.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("") || "{}";
     let result: any;
     try { result = JSON.parse(text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()); }
     catch { result = { software: "", description: "Script analysis failed", name: "" }; }

@@ -1,8 +1,8 @@
 import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
 import { db } from "@workspace/db";
-import { usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { usersTable, orgMembersTable } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
 
 const SECRET = process.env["SESSION_SECRET"] ?? "infra-copilot-secret";
 
@@ -41,10 +41,28 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     res.status(403).json({ error: "Account is not active", status: user.status });
     return;
   }
+  // Org membership role is the source of truth (usersTable.role may be stale);
+  // scope the lookup to the org in the route when present, otherwise fall back
+  // to the user's global role.
+  const orgIdMatch = req.path.match(/^\/organizations\/(\d+)(\/|$)/);
+  let effectiveRole: string | null = user.role;
+  if (orgIdMatch) {
+    const routeOrgId = parseInt(orgIdMatch[1]!, 10);
+    const memberships = await db
+      .select({ role: orgMembersTable.role })
+      .from(orgMembersTable)
+      .where(and(eq(orgMembersTable.userId, user.id), eq(orgMembersTable.orgId, routeOrgId)))
+      .limit(1);
+    if (memberships[0]?.role) effectiveRole = memberships[0].role;
+  }
+  if (effectiveRole && effectiveRole !== user.role) {
+    (user as { role: string | null }).role = effectiveRole as typeof user.role;
+  }
+
   // ── Reviewer role: view-only, except generating documents and reports ──────
   // Reviewers may read everything (GET/HEAD/OPTIONS) but their only allowed
   // write operations are document generation and report generation.
-  if (user.role === "reviewer") {
+  if (effectiveRole === "reviewer") {
     const method = req.method.toUpperCase();
     const isRead = method === "GET" || method === "HEAD" || method === "OPTIONS";
     const path = req.path;

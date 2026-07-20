@@ -3,23 +3,36 @@ import { db } from "@workspace/db";
 import { documentsTable, reportsTable, serversTable, deploymentsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { authMiddleware } from "../lib/auth";
-import { GoogleGenAI } from "@google/genai";
+import Anthropic from "@anthropic-ai/sdk";
 
-let _gemini: GoogleGenAI | null = null;
-function getGemini(): GoogleGenAI {
-  if (!_gemini) {
-    const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
-    const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
-    if (!apiKey || !baseUrl) throw new Error("Gemini not configured");
-    _gemini = new GoogleGenAI({ apiKey, httpOptions: { baseUrl, apiVersion: "" } });
+let _claude: Anthropic | null = null;
+function getClaude(): Anthropic {
+  if (!_claude) {
+    const apiKey = process.env["AI_INTEGRATIONS_ANTHROPIC_API_KEY"];
+    const baseURL = process.env["AI_INTEGRATIONS_ANTHROPIC_BASE_URL"];
+    if (!apiKey || !baseURL) throw new Error("Anthropic not configured");
+    _claude = new Anthropic({ apiKey, baseURL });
   }
-  return _gemini;
+  return _claude;
+}
+
+async function claudeGenerate(prompt: string, maxTokens = 8192): Promise<string> {
+  const response = await getClaude().messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: maxTokens,
+    messages: [{ role: "user", content: prompt }],
+  });
+  return response.content
+    .filter((b) => b.type === "text")
+    .map((b: any) => b.text)
+    .join("")
+    .trim();
 }
 
 const router = Router();
 router.use(authMiddleware);
 
-// Per-type AI prompts — Gemini fills every section using real server/deployment data
+// Per-type AI prompts — Claude fills every section using real server/deployment data
 const DOC_PROMPTS: Record<string, (title: string, ctx: string, date: string) => string> = {
   deployment_report: (title, ctx, date) =>
     `You are a senior DevOps engineer writing an official Deployment Report.
@@ -192,15 +205,9 @@ router.post("/organizations/:orgId/documents", async (req, res) => {
   const promptFn = DOC_PROMPTS[type];
   if (promptFn) {
     try {
-      const ai = getGemini();
       const aiPrompt = promptFn(title, contextBlock, today);
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: aiPrompt }] }],
-        config: { maxOutputTokens: 8192 },
-      });
-      content = response.text?.trim() ?? "";
-      if (!content) throw new Error("Empty response from Gemini");
+      content = await claudeGenerate(aiPrompt);
+      if (!content) throw new Error("Empty response from Claude");
     } catch (err: any) {
       console.error(`[documents] AI generation failed for type=${type}:`, err?.message ?? err);
       content = `# ${title}\n\n*Document generation failed. Please try again.*\n\n${contextBlock}`;
@@ -412,14 +419,8 @@ router.post("/organizations/:orgId/reports", async (req, res) => {
   let content = "";
   if (promptFn) {
     try {
-      const ai = getGemini();
       const aiPrompt = promptFn(title, contextBlock, period, today);
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: aiPrompt }] }],
-        config: { maxOutputTokens: 8192 },
-      });
-      content = response.text?.trim() ?? "";
+      content = await claudeGenerate(aiPrompt);
     } catch (err: any) {
       console.error(`[reports] AI generation failed for type=${type}:`, err?.message ?? err);
       content = `# ${title}\n\n*Report generation failed. Please try again.*\n\n${contextBlock}`;

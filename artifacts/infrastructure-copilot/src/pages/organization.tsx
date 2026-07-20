@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Plus, Users, Building2, Shield, Trash2, CheckCircle2, AlertCircle, UserPlus, X, Loader2 } from "lucide-react";
-import { useGetOrganization, useListOrgMembers, useAddOrgMember, useUpdateOrgMember, useRemoveOrgMember, getGetOrganizationQueryKey, getListOrgMembersQueryKey } from "@workspace/api-client-react";
+import { Users, Building2, Shield, Trash2, CheckCircle2, AlertCircle, UserPlus, X, Loader2 } from "lucide-react";
+import { useGetOrganization, useListOrgMembers, useUpdateOrgMember, useRemoveOrgMember, getGetOrganizationQueryKey, getListOrgMembersQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -221,11 +221,8 @@ function MemberRow({
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function OrganizationPage() {
   const { orgId, user } = useAuth();
-  const isReviewer = user?.role === "reviewer";
+  const isAdmin = user?.role === "admin"; // only admins manage members
   const qc = useQueryClient();
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("engineer");
-  const [inviting, setInviting] = useState(false);
   const [showCreateAccount, setShowCreateAccount] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -239,35 +236,6 @@ export default function OrganizationPage() {
   };
 
   const refreshMembers = () => qc.invalidateQueries({ queryKey: getListOrgMembersQueryKey(orgId) });
-
-  const addMember = useAddOrgMember({
-    mutation: {
-      onSuccess: () => {
-        refreshMembers();
-        setInviteEmail("");
-        setInviting(false);
-        showToast("success", "Member added successfully");
-      },
-      onError: (err: any) => {
-        setInviting(false);
-        const status = err?.response?.status ?? err?.status;
-        if (status === 404) {
-          showToast("error", "No account with that email — use 'Create Account' to set one up directly.");
-        } else if (status === 409) {
-          showToast("error", "This user is already a member of your organisation.");
-        } else {
-          showToast("error", err?.message ?? "Failed to add member. Please try again.");
-        }
-      },
-    },
-  });
-
-  const handleInvite = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail) return;
-    setInviting(true);
-    addMember.mutate({ orgId, data: { email: inviteEmail, role: inviteRole } } as any);
-  };
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
@@ -295,7 +263,7 @@ export default function OrganizationPage() {
             <p className="text-muted-foreground text-sm mt-1">{allMembers.length} member{allMembers.length !== 1 ? "s" : ""}</p>
           </div>
         </div>
-        {!isReviewer && (
+        {isAdmin && (
           <Button size="sm" onClick={() => setShowCreateAccount(true)}>
             <UserPlus className="w-4 h-4 mr-2" />Create Account
           </Button>
@@ -317,40 +285,6 @@ export default function OrganizationPage() {
           </div>
         ))}
       </div>
-
-      {/* Add existing member */}
-      {!isReviewer && (
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h2 className="font-semibold text-foreground mb-1 flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Add existing member
-        </h2>
-        <p className="text-xs text-muted-foreground mb-4">
-          Enter the email of someone who already has a GuideX account. To create a new account, use the <strong>Create Account</strong> button above.
-        </p>
-        <form onSubmit={handleInvite} className="flex items-center gap-3">
-          <Input
-            type="email"
-            placeholder="colleague@company.com"
-            value={inviteEmail}
-            onChange={e => setInviteEmail(e.target.value)}
-            className="flex-1"
-            required
-          />
-          <select
-            value={inviteRole}
-            onChange={e => setInviteRole(e.target.value)}
-            className="h-9 rounded-md border border-border bg-background text-sm px-2 text-foreground"
-          >
-            <option value="engineer">Engineer</option>
-            <option value="reviewer">Reviewer</option>
-            <option value="admin">Admin</option>
-          </select>
-          <Button type="submit" size="sm" disabled={inviting}>
-            {inviting ? "Adding…" : "Add"}
-          </Button>
-        </form>
-      </div>
-      )}
 
       {/* Members list */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -378,7 +312,7 @@ export default function OrganizationPage() {
                   showToast("success", `${m.name ?? m.email} removed`);
                 }}
                 onRoleChanged={refreshMembers}
-                readOnly={isReviewer}
+                readOnly={!isAdmin}
               />
             ))}
           </div>
