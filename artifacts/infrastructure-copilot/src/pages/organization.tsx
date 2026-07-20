@@ -133,12 +133,13 @@ function CreateAccountDialog({
 
 // ── Member row — isolated per-row mutations so one row's state never bleeds into another ──
 function MemberRow({
-  member, orgId, onRemoved, onRoleChanged,
+  member, orgId, onRemoved, onRoleChanged, readOnly,
 }: {
   member: any;
   orgId: number;
   onRemoved: () => void;
   onRoleChanged: () => void;
+  readOnly?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -173,7 +174,7 @@ function MemberRow({
       <select
         value={member.role}
         onChange={e => handleRoleChange(e.target.value)}
-        disabled={updateRole.isPending}
+        disabled={readOnly || updateRole.isPending}
         className="h-7 rounded-md border border-border bg-background text-xs px-2 text-foreground disabled:opacity-50"
       >
         <option value="engineer">Engineer</option>
@@ -181,7 +182,7 @@ function MemberRow({
         <option value="admin">Admin</option>
       </select>
 
-      {confirmDelete ? (
+      {readOnly ? null : confirmDelete ? (
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-xs text-destructive mr-1">Remove?</span>
           <Button
@@ -219,7 +220,8 @@ function MemberRow({
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function OrganizationPage() {
-  const { orgId } = useAuth();
+  const { orgId, user } = useAuth();
+  const isReviewer = user?.role === "reviewer";
   const qc = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("engineer");
@@ -293,9 +295,11 @@ export default function OrganizationPage() {
             <p className="text-muted-foreground text-sm mt-1">{allMembers.length} member{allMembers.length !== 1 ? "s" : ""}</p>
           </div>
         </div>
-        <Button size="sm" onClick={() => setShowCreateAccount(true)}>
-          <UserPlus className="w-4 h-4 mr-2" />Create Account
-        </Button>
+        {!isReviewer && (
+          <Button size="sm" onClick={() => setShowCreateAccount(true)}>
+            <UserPlus className="w-4 h-4 mr-2" />Create Account
+          </Button>
+        )}
       </div>
 
       {/* Role summary */}
@@ -315,6 +319,7 @@ export default function OrganizationPage() {
       </div>
 
       {/* Add existing member */}
+      {!isReviewer && (
       <div className="rounded-xl border border-border bg-card p-5">
         <h2 className="font-semibold text-foreground mb-1 flex items-center gap-2">
           <Plus className="w-4 h-4" /> Add existing member
@@ -345,6 +350,7 @@ export default function OrganizationPage() {
           </Button>
         </form>
       </div>
+      )}
 
       {/* Members list */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -372,6 +378,7 @@ export default function OrganizationPage() {
                   showToast("success", `${m.name ?? m.email} removed`);
                 }}
                 onRoleChanged={refreshMembers}
+                readOnly={isReviewer}
               />
             ))}
           </div>

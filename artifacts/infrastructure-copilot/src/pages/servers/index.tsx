@@ -202,7 +202,7 @@ function TestResult({ result, onClose }: { result: { success: boolean; message: 
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function ServersPage() {
-  const { orgId, token } = useAuth() as any;
+  const { orgId, token, user } = useAuth() as any;
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -315,9 +315,11 @@ export default function ServersPage() {
             {allServers.length} server{allServers.length !== 1 ? "s" : ""} across {(groups ?? []).length} group{(groups ?? []).length !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button size="sm" onClick={() => setShowAdd(true)} data-testid="btn-add-server">
-          <Plus className="w-4 h-4 mr-2" />Add Server
-        </Button>
+        {user?.role !== "reviewer" && (
+          <Button size="sm" onClick={() => setShowAdd(true)} data-testid="btn-add-server">
+            <Plus className="w-4 h-4 mr-2" />Add Server
+          </Button>
+        )}
       </div>
 
       {/* Stats row */}
@@ -393,7 +395,7 @@ export default function ServersPage() {
                   <p className="font-medium">
                     {allServers.length === 0 ? "No servers added yet" : "No servers match your filters"}
                   </p>
-                  {allServers.length === 0 && (
+                  {allServers.length === 0 && user?.role !== "reviewer" && (
                     <button onClick={() => setShowAdd(true)} className="mt-3 text-sm text-primary hover:underline">
                       Add your first server →
                     </button>
@@ -446,15 +448,17 @@ export default function ServersPage() {
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           : <Wifi className="w-3.5 h-3.5" />}
                       </button>
-                      {/* SSH terminal */}
-                      <button
-                        onClick={() => setSshServer(server)}
-                        className="p-1.5 rounded text-muted-foreground hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors"
-                        title="Open SSH terminal"
-                        data-testid={`btn-connect-${server.id}`}
-                      >
-                        <Terminal className="w-3.5 h-3.5" />
-                      </button>
+                      {/* SSH terminal — hidden for view-only reviewers */}
+                      {user?.role !== "reviewer" && (
+                        <button
+                          onClick={() => setSshServer(server)}
+                          className="p-1.5 rounded text-muted-foreground hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors"
+                          title="Open SSH terminal"
+                          data-testid={`btn-connect-${server.id}`}
+                        >
+                          <Terminal className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       {/* View detail */}
                       <Link href={`/servers/${server.id}`}>
                         <button
@@ -465,18 +469,20 @@ export default function ServersPage() {
                           <Eye className="w-3.5 h-3.5" />
                         </button>
                       </Link>
-                      {/* Delete */}
-                      <button
-                        onClick={() => deleteServer(server.id, server.name)}
-                        disabled={deletingId === server.id}
-                        className="p-1.5 rounded text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                        title="Delete server"
-                        data-testid={`btn-delete-${server.id}`}
-                      >
-                        {deletingId === server.id
-                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          : <Trash2 className="w-3.5 h-3.5" />}
-                      </button>
+                      {/* Delete — hidden for view-only reviewers */}
+                      {user?.role !== "reviewer" && (
+                        <button
+                          onClick={() => deleteServer(server.id, server.name)}
+                          disabled={deletingId === server.id}
+                          className="p-1.5 rounded text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                          title="Delete server"
+                          data-testid={`btn-delete-${server.id}`}
+                        >
+                          {deletingId === server.id
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Trash2 className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

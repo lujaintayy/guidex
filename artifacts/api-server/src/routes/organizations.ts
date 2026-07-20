@@ -107,26 +107,46 @@ router.get("/organizations/:orgId/members", async (req, res) => {
   res.json(members);
 });
 
+// Only org admins may manage members (add / change role / remove)
+function requireAdmin(req: Parameters<typeof getUser>[0], res: import("express").Response): boolean {
+  const me = getUser(req);
+  if (me.role !== "admin") {
+    res.status(403).json({ error: "Only admins can manage organization members" });
+    return false;
+  }
+  return true;
+}
+
 router.post("/organizations/:orgId/members", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
   const orgId = parseInt(req.params["orgId"] ?? "0");
   const user = getUser(req);
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, req.body.email)).limit(1);
   if (!existing) { res.status(404).json({ error: "User not found" }); return; }
-  await db.insert(orgMembersTable).values({ orgId, userId: existing.id, role: req.body.role ?? "engineer" });
+  const newRole = ["engineer", "reviewer", "admin"].includes(req.body.role) ? req.body.role : "engineer";
+  await db.insert(orgMembersTable).values({ orgId, userId: existing.id, role: newRole });
+  // Keep the user's global role in sync so auth enforcement (e.g. reviewer view-only) applies
+  await db.update(usersTable).set({ role: newRole }).where(eq(usersTable.id, existing.id));
   await logAudit({ orgId, userId: user.id, action: "member_added", resourceType: "user", resourceId: existing.id, resourceName: existing.name });
   res.status(201).json({ userId: existing.id, name: existing.name, email: existing.email, role: req.body.role, joinedAt: new Date() });
 });
 
 router.patch("/organizations/:orgId/members/:userId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
   const orgId = parseInt(req.params["orgId"] ?? "0");
   const userId = parseInt(req.params["userId"] ?? "0");
   await db.update(orgMembersTable).set({ role: req.body.role }).where(and(eq(orgMembersTable.orgId, orgId), eq(orgMembersTable.userId, userId)));
+  // Keep the user's global role in sync so auth enforcement (e.g. reviewer view-only) applies
+  if (["engineer", "reviewer", "admin"].includes(req.body.role)) {
+    await db.update(usersTable).set({ role: req.body.role }).where(eq(usersTable.id, userId));
+  }
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
   res.json({ userId: user.id, name: user.name, email: user.email, role: req.body.role, joinedAt: new Date() });
 });
 
 router.delete("/organizations/:orgId/members/:userId", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
   const orgId = parseInt(req.params["orgId"] ?? "0");
   const userId = parseInt(req.params["userId"] ?? "0");
   await db.delete(orgMembersTable).where(and(eq(orgMembersTable.orgId, orgId), eq(orgMembersTable.userId, userId)));

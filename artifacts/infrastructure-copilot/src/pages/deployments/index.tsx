@@ -123,6 +123,7 @@ export default function DeploymentsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const { user } = useAuth();
 
   const { data: deployments, isLoading } = useListDeployments(orgId, {}, { query: { queryKey: getListDeploymentsQueryKey(orgId, {}) } });
   const allDeploys = (deployments ?? []) as any[];
@@ -142,9 +143,11 @@ export default function DeploymentsPage() {
           <h1 className="text-2xl font-bold text-foreground">Deployments</h1>
           <p className="text-muted-foreground text-sm mt-1">{allDeploys.length} total deployment{allDeploys.length !== 1 ? "s" : ""}</p>
         </div>
-        <Button size="sm" onClick={() => setShowNew(true)} data-testid="btn-new-deployment">
-          <Plus className="w-4 h-4 mr-2" />New Deployment
-        </Button>
+        {user?.role !== "reviewer" && (
+          <Button size="sm" onClick={() => setShowNew(true)} data-testid="btn-new-deployment">
+            <Plus className="w-4 h-4 mr-2" />New Deployment
+          </Button>
+        )}
       </div>
 
       {/* Approval queue */}

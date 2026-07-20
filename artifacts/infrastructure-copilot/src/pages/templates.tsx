@@ -206,10 +206,10 @@ function CreateTemplateDialog({ orgId, onClose, onSuccess }: { orgId: number; on
 
 // ── View Template Modal ────────────────────────────────────────────────────────
 function ViewTemplateModal({
-  template, orgId, onClose, onDeleted, onEdited,
+  template, orgId, onClose, onDeleted, onEdited, readOnly,
 }: {
   template: any; orgId: number; onClose: () => void;
-  onDeleted: () => void; onEdited: () => void;
+  onDeleted: () => void; onEdited: () => void; readOnly?: boolean;
 }) {
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -276,7 +276,7 @@ function ViewTemplateModal({
               : <h2 className="font-semibold text-foreground">{template.name}</h2>}
           </div>
           <div className="flex items-center gap-2">
-            {!template.isBuiltIn && (
+            {!template.isBuiltIn && !readOnly && (
               <>
                 <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => setEditing(!editing)}>
                   <Edit3 className="w-3 h-3" />{editing ? "Cancel" : "Edit"}
@@ -378,7 +378,8 @@ function ViewTemplateModal({
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function TemplatesPage() {
-  const { orgId } = useAuth();
+  const { orgId, user } = useAuth();
+  const isReviewer = user?.role === "reviewer";
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -411,6 +412,7 @@ export default function TemplatesPage() {
           onClose={() => setViewTemplate(null)}
           onDeleted={refresh}
           onEdited={refresh}
+          readOnly={isReviewer}
         />
       )}
 
@@ -419,9 +421,11 @@ export default function TemplatesPage() {
           <h1 className="text-2xl font-bold text-foreground">Templates</h1>
           <p className="text-muted-foreground text-sm mt-1">{all.length} deployment template{all.length !== 1 ? "s" : ""}</p>
         </div>
-        <Button size="sm" onClick={() => setShowCreate(true)} data-testid="btn-create-template">
-          <Plus className="w-4 h-4 mr-2" />Create Template
-        </Button>
+        {!isReviewer && (
+          <Button size="sm" onClick={() => setShowCreate(true)} data-testid="btn-create-template">
+            <Plus className="w-4 h-4 mr-2" />Create Template
+          </Button>
+        )}
       </div>
 
       <div className="relative max-w-sm">
@@ -444,9 +448,11 @@ export default function TemplatesPage() {
           <FileCode2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="text-lg font-medium">No templates yet</p>
           <p className="text-sm mt-1 mb-4">Paste a script and let AI auto-fill the details</p>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus className="w-4 h-4 mr-2" />Create Template
-          </Button>
+          {!isReviewer && (
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="w-4 h-4 mr-2" />Create Template
+            </Button>
+          )}
         </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">

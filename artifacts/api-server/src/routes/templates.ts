@@ -114,23 +114,23 @@ router.post("/organizations/:orgId/templates/generate-script", async (req, res) 
     return;
   }
 
-  const apiKey = process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
-  const baseUrl = process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"];
-  if (!apiKey || !baseUrl) { res.status(503).json({ error: "AI service not configured" }); return; }
+  const apiKey = process.env["AI_INTEGRATIONS_ANTHROPIC_API_KEY"];
+  const baseURL = process.env["AI_INTEGRATIONS_ANTHROPIC_BASE_URL"];
+  if (!apiKey || !baseURL) { res.status(503).json({ error: "AI service not configured" }); return; }
 
   try {
-    const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl, apiVersion: "" } });
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const claude = new Anthropic({ apiKey, baseURL });
 
-    const prompt = `You are a senior Linux systems engineer. Write a production-quality bash installation/configuration script based on these requirements:
+    const prompt = `Write a production-quality bash installation/configuration script based on these requirements:
 
 Template Name: ${name}
 Software Package: ${software}
-Description: ${description}
+Description / Requirements: ${description}
 
 Requirements for the script:
 - Start with #!/bin/bash and set -euo pipefail
-- Include a clear header comment block with the template name, software, description, and date
+- Include a clear header comment block with the template name, software, and description
 - Support Ubuntu/Debian (use apt-get) as primary, with CentOS/RHEL fallback if relevant
 - Run non-interactive (use DEBIAN_FRONTEND=noninteractive, -y flags, etc.)
 - Include proper error handling and informational echo statements at each major step
@@ -138,17 +138,23 @@ Requirements for the script:
 - Include basic validation/health checks at the end (e.g. verify service is running, version check)
 - Add configuration steps appropriate for the software (e.g. firewall rules, default config, security hardening)
 - Comment each major section clearly
+- Follow the user's description EXACTLY — every requirement they mention must be implemented in the script
 - Do NOT use placeholder values — write real, runnable commands
 
 Return ONLY the bash script with no explanation, no markdown code fences, no preamble.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { maxOutputTokens: 4096 },
+    const response = await claude.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 4096,
+      system: "You are a senior Linux systems engineer who writes precise, production-ready bash scripts. You implement every requirement the user specifies, exactly as described.",
+      messages: [{ role: "user", content: prompt }],
     });
 
-    let script = response.text?.trim() ?? "";
+    let script = response.content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text)
+      .join("")
+      .trim();
     // Strip markdown fences if the model added them
     script = script.replace(/^```(?:bash|sh)?\n?/i, "").replace(/\n?```$/i, "").trim();
 

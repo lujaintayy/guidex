@@ -41,6 +41,26 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     res.status(403).json({ error: "Account is not active", status: user.status });
     return;
   }
+  // ── Reviewer role: view-only, except generating documents and reports ──────
+  // Reviewers may read everything (GET/HEAD/OPTIONS) but their only allowed
+  // write operations are document generation and report generation.
+  if (user.role === "reviewer") {
+    const method = req.method.toUpperCase();
+    const isRead = method === "GET" || method === "HEAD" || method === "OPTIONS";
+    const path = req.path;
+    // Only exact generation endpoints (POST /organizations/:id/documents and /reports)
+    // — no delete/update of documents or reports, no other writes.
+    const isAllowedWrite =
+      (method === "POST" && /^\/organizations\/\d+\/(documents|reports)\/?$/.test(path)) ||
+      (method === "PATCH" && path === "/auth/me/password"); // own password only
+    if (!isRead && !isAllowedWrite) {
+      res.status(403).json({
+        error: "Reviewers have view-only access. You can only generate documents and reports.",
+      });
+      return;
+    }
+  }
+
   (req as Request & { user: typeof user }).user = user;
   next();
 }
